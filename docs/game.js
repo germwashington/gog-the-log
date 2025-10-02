@@ -358,12 +358,9 @@ class Game {
     }
     
     render() {
-        // Clear canvas with optimized clearing
+        // Clear canvas
         this.ctx.fillStyle = 'rgba(0, 4, 40, 0.1)';
         this.ctx.fillRect(0, 0, this.width, this.height);
-        
-        // Enable image smoothing for better performance
-        this.ctx.imageSmoothingEnabled = false;
         
         // Draw stars
         this.ctx.fillStyle = '#ffffff';
