@@ -1,6 +1,10 @@
-# Tyrian Reborn
+# Tyrian Reborn 🚀
 
 A modern tribute to the classic space shooter Tyrian 2000, built with HTML5 Canvas and JavaScript.
+
+## 🎮 [Play Live Demo](https://yourusername.github.io/gog-the-log/)
+
+> **Note:** Replace `yourusername` with your actual GitHub username in the URL above.
 
 ## Features
 
@@ -77,6 +81,79 @@ Potential features for future versions:
 ## Credits
 
 Inspired by the classic Tyrian 2000 by Epic MegaGames. This is a fan tribute created for educational and entertainment purposes.
+
+## 🚀 Deployment to GitHub Pages
+
+### Automatic Deployment (Recommended)
+
+This project is configured for automatic deployment to GitHub Pages using GitHub Actions:
+
+1. **Fork or clone this repository** to your GitHub account
+2. **Go to your repository settings** on GitHub
+3. **Navigate to Pages** in the left sidebar
+4. **Set Source to "GitHub Actions"**
+5. **Push any changes** to the `main` or `master` branch
+6. **GitHub Actions will automatically build and deploy** your game
+7. **Your game will be available** at `https://yourusername.github.io/repository-name/`
+
+### Manual Deployment
+
+If you prefer manual deployment:
+
+1. Go to your repository **Settings → Pages**
+2. Set **Source** to "Deploy from a branch"
+3. Select **Branch: main** (or master) and **/ (root)**
+4. Click **Save**
+5. Your site will be available at `https://yourusername.github.io/repository-name/`
+
+### Custom Domain (Optional)
+
+To use a custom domain:
+
+1. **Edit the `CNAME` file** and replace the commented line with your domain
+2. **Configure your domain's DNS** to point to GitHub Pages
+3. **Enable "Enforce HTTPS"** in repository settings
+
+### Local Development
+
+To run locally during development:
+
+```bash
+# Using Python (if installed)
+python -m http.server 8000
+
+# Using Node.js (if installed)
+npx http-server -p 8000 -o
+
+# Using PHP (if installed)
+php -S localhost:8000
+```
+
+Then open `http://localhost:8000` in your browser.
+
+## 📱 Progressive Web App (PWA)
+
+This game includes PWA support:
+- **Add to home screen** on mobile devices
+- **Offline capable** (after first load)
+- **Full-screen gaming experience**
+- **Optimized for mobile and desktop**
+
+## 🌐 Browser Compatibility
+
+Tested and working on:
+- ✅ Chrome 60+
+- ✅ Firefox 55+
+- ✅ Safari 11+
+- ✅ Edge 79+
+- ✅ Mobile browsers (iOS Safari, Chrome Mobile)
+
+## 📊 Performance
+
+- **60 FPS** smooth gameplay
+- **Lightweight** - No external dependencies
+- **Fast loading** - Optimized assets
+- **Responsive** - Works on all screen sizes
 
 ## License
 

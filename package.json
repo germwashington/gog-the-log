@@ -23,7 +23,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/yourusername/tyrian-reborn.git"
+    "url": "https://github.com/yourusername/gog-the-log.git"
   },
-  "homepage": "https://yourusername.github.io/tyrian-reborn"
+  "homepage": "https://yourusername.github.io/gog-the-log",
+  "engines": {
+    "node": ">=14.0.0"
+  }
 }
