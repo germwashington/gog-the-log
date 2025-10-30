@@ -142,12 +142,35 @@ class Game {
     }
     
     createStarField() {
-        for (let i = 0; i < 100; i++) {
+        this.stars = [];
+        // Far layer - small, slow
+        for (let i = 0; i < 60; i++) {
             this.stars.push({
                 x: Math.random() * this.width,
                 y: Math.random() * this.height,
-                speed: Math.random() * 2 + 0.5,
-                brightness: Math.random() * 0.8 + 0.2
+                speed: 20 + Math.random() * 20, // px/sec
+                brightness: Math.random() * 0.4 + 0.1,
+                size: 1
+            });
+        }
+        // Mid layer - medium
+        for (let i = 0; i < 45; i++) {
+            this.stars.push({
+                x: Math.random() * this.width,
+                y: Math.random() * this.height,
+                speed: 40 + Math.random() * 40,
+                brightness: Math.random() * 0.5 + 0.2,
+                size: 2
+            });
+        }
+        // Near layer - large, fast
+        for (let i = 0; i < 30; i++) {
+            this.stars.push({
+                x: Math.random() * this.width,
+                y: Math.random() * this.height,
+                speed: 70 + Math.random() * 50,
+                brightness: Math.random() * 0.6 + 0.4,
+                size: 3
             });
         }
     }
@@ -209,9 +232,15 @@ class Game {
             this.backgroundOffset = 0;
         }
         
-        // Update stars
+        // Update stars (parallax) and background offset
+        const speedBoost = this.player ? (this.player.upgrades?.speed || 1) : 1;
+        this.backgroundOffset += (this.scrollSpeed * 0.6 * speedBoost) * deltaTime / 1000;
+        if (this.backgroundOffset > this.height) {
+            this.backgroundOffset -= this.height;
+        }
+
         this.stars.forEach(star => {
-            star.y += star.speed * deltaTime / 16;
+            star.y += star.speed * speedBoost * deltaTime / 1000;
             if (star.y > this.height) {
                 star.y = 0;
                 star.x = Math.random() * this.width;
@@ -279,7 +308,7 @@ class Game {
             // Medium enemies
             'basic', 'fast', 'zigzag', 'sidewinder',
             // Strong enemies
-            'heavy', 'hunter', 'bomber', 'spiral',
+            'heavy', 'hunter', 'bomber', 'spiral', 'turret',
             // Elite enemies (rare)
             'elite_hunter', 'elite_bomber', 'elite_spiral'
         ];
@@ -369,14 +398,17 @@ class Game {
     
     render() {
         // Clear canvas
-        this.ctx.fillStyle = 'rgba(0, 4, 40, 0.1)';
+        this.ctx.fillStyle = 'rgba(0, 4, 40, 1)';
         this.ctx.fillRect(0, 0, this.width, this.height);
-        
-        // Draw stars
+
+        // Draw background speed streaks using backgroundOffset
+        this.drawBackground(this.ctx);
+
+        // Draw parallax stars with varying sizes
         this.ctx.fillStyle = '#ffffff';
         this.stars.forEach(star => {
             this.ctx.globalAlpha = star.brightness;
-            this.ctx.fillRect(star.x, star.y, 1, 1);
+            this.ctx.fillRect(star.x, star.y, star.size, star.size);
         });
         this.ctx.globalAlpha = 1;
         
@@ -389,6 +421,33 @@ class Game {
             this.powerUps.forEach(powerUp => powerUp.render(this.ctx));
             this.particles.forEach(particle => particle.render(this.ctx));
         }
+    }
+
+    drawBackground(ctx) {
+        // Subtle forward motion streaks and horizon bands
+        const offset = this.backgroundOffset % this.height;
+
+        // Horizon bands
+        ctx.save();
+        const bandHeight = 80;
+        const grad = ctx.createLinearGradient(0, this.height - bandHeight, 0, this.height);
+        grad.addColorStop(0, 'rgba(0, 20, 80, 0.0)');
+        grad.addColorStop(1, 'rgba(0, 40, 120, 0.25)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, this.height - bandHeight, this.width, bandHeight);
+
+        // Moving streak lines
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
+        ctx.lineWidth = 2;
+        const spacing = 40;
+        for (let y = -spacing; y < this.height + spacing; y += spacing) {
+            const lineY = ((y + offset) % (this.height + spacing)) - spacing;
+            ctx.beginPath();
+            ctx.moveTo(0, lineY);
+            ctx.lineTo(this.width, lineY);
+            ctx.stroke();
+        }
+        ctx.restore();
     }
     
     updateUI() {
@@ -641,6 +700,9 @@ class Player {
         ctx.fillRect(this.x + 12, this.y + 35, 6, 8);
         ctx.fillRect(this.x + 22, this.y + 35, 6, 8);
         
+        // Upgrade-driven visual changes
+        this.drawUpgradeAccents(ctx);
+
         // Draw ship outline
         ctx.strokeStyle = '#00ff00';
         ctx.lineWidth = 1;
@@ -661,6 +723,40 @@ class Player {
             
             ctx.fillStyle = `rgba(0, 136, 255, ${trailAlpha})`;
             ctx.fillRect(trailX, trailY, trailSize, trailSize);
+        }
+    }
+
+    drawUpgradeAccents(ctx) {
+        // Speed upgrades: longer engines and side fins
+        if (this.upgrades.speed > 1.1) {
+            const extra = Math.min(10, Math.floor((this.upgrades.speed - 1) * 8));
+            ctx.fillStyle = 'rgba(0, 180, 255, 0.7)';
+            ctx.fillRect(this.x + 12, this.y + 35, 6, 8 + extra);
+            ctx.fillRect(this.x + 22, this.y + 35, 6, 8 + extra);
+
+            // Side fins
+            ctx.fillStyle = '#00bb44';
+            ctx.fillRect(this.x - 3, this.y + 22, 3, 12);
+            ctx.fillRect(this.x + this.width, this.y + 22, 3, 12);
+        }
+
+        // Fire rate upgrades: add top vents
+        if (this.upgrades.fireRate > 1.1) {
+            ctx.fillStyle = '#228844';
+            ctx.fillRect(this.x + 13, this.y + 10, 3, 6);
+            ctx.fillRect(this.x + 24, this.y + 10, 3, 6);
+        }
+
+        // Damage upgrades: red nose accents
+        if (this.upgrades.damage > 1.1) {
+            ctx.fillStyle = '#ff3355';
+            ctx.fillRect(this.x + 18, this.y + 3, 4, 6);
+        }
+
+        // Weapon level 3: add nose cone
+        if (this.weaponLevel >= 3) {
+            ctx.fillStyle = '#22ff99';
+            ctx.fillRect(this.x + 17, this.y + 2, 6, 4);
         }
     }
 }
@@ -789,6 +885,18 @@ class Enemy {
                 this.aggressionLevel = 2;
                 this.tier = 'strong';
                 break;
+            case 'turret':
+                // Stationary relative to background; movement handled in update()
+                this.speed = 0;
+                this.health = 70;
+                this.maxHealth = 70;
+                this.points = 300;
+                this.fireRate = 1100;
+                this.width = 34;
+                this.height = 34;
+                this.aggressionLevel = 3;
+                this.tier = 'strong';
+                break;
             case 'spiral':
                 this.speed = 120;
                 this.health = 35;
@@ -908,6 +1016,13 @@ class Enemy {
                 this.x = centerX + Math.cos(this.angle) * this.radius;
                 this.y += this.speed * deltaTime / 1000 * 0.5;
                 break;
+            case 'turret':
+                // Move with background scrolling so it appears attached to terrain
+                {
+                    const speedBoost = this.player ? (this.player.upgrades?.speed || 1) : 1;
+                    this.y += (game.scrollSpeed * 0.6 * speedBoost) * deltaTime / 1000;
+                }
+                break;
             default: // basic
                 this.y += this.speed * deltaTime / 1000;
                 this.x += Math.sin(this.moveTimer / 500) * 1;
@@ -970,7 +1085,7 @@ class Enemy {
                         ));
                     }
                     break;
-                case 'hunter':
+            case 'hunter':
                     // Homing shot
                     const homingBullet = new Bullet(
                         this.x + this.width/2, 
@@ -981,6 +1096,18 @@ class Enemy {
                     homingBullet.target = this.player;
                     game.bullets.push(homingBullet);
                     break;
+            case 'turret':
+                {
+                    const tBullet = new Bullet(
+                        this.x + this.width/2,
+                        this.y + this.height/2,
+                        'enemy',
+                        'homing'
+                    );
+                    tBullet.target = this.player;
+                    game.bullets.push(tBullet);
+                }
+                break;
                 case 'spiral':
                     // Spiral shot pattern
                     for (let i = 0; i < 3; i++) {
@@ -1078,6 +1205,9 @@ class Enemy {
                 break;
             case 'hunter':
                 this.drawHunter(ctx);
+                break;
+            case 'turret':
+                this.drawTurret(ctx);
                 break;
             case 'bomber':
                 this.drawBomber(ctx);
@@ -1350,6 +1480,28 @@ class Enemy {
         for (let i = 0; i < 3; i++) {
             ctx.fillRect(this.x + 12 + i * 6, this.y + 2, 3, 3);
         }
+    }
+    
+    drawTurret(ctx) {
+        // Base
+        const baseGrad = ctx.createLinearGradient(this.x, this.y, this.x, this.y + this.height);
+        baseGrad.addColorStop(0, '#444a55');
+        baseGrad.addColorStop(1, '#262a33');
+        ctx.fillStyle = baseGrad;
+        ctx.fillRect(this.x + 2, this.y + 10, this.width - 4, this.height - 12);
+
+        // Mount
+        ctx.fillStyle = '#667080';
+        ctx.fillRect(this.x + 8, this.y + 6, this.width - 16, 10);
+
+        // Barrel pointing down toward player area
+        ctx.fillStyle = '#99a6b8';
+        ctx.fillRect(this.x + this.width/2 - 3, this.y + 2, 6, 18);
+
+        // Lights
+        ctx.fillStyle = '#ff3344';
+        ctx.fillRect(this.x + 6, this.y + this.height - 8, 4, 4);
+        ctx.fillRect(this.x + this.width - 10, this.y + this.height - 8, 4, 4);
     }
     
     drawBasic(ctx) {
