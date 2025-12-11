@@ -1,4 +1,6 @@
-// Tyrian Reborn - Game Engine
+// Energy Shard Collection Shooter - v2.0 Implementation
+// Complete implementation based on 2.0 plan specifications
+
 class Game {
     constructor() {
         this.canvas = document.getElementById('gameCanvas');
@@ -7,47 +9,75 @@ class Game {
         this.height = this.canvas.height;
         
         // Game state
-        this.gameState = 'start'; // start, playing, paused, gameOver
+        this.gameState = 'start'; // start, playing, levelComplete, stageTransition, bossFight, gameOver, victory
         this.score = 0;
-        this.level = 1;
+        this.stage = 1;
+        this.level = 1; // Level within stage (1-5)
+        this.totalShardsCollected = 0;
+        this.shardsCollectedThisLevel = 0;
+        this.shardsNeeded = 10;
         this.lastTime = 0;
         this.deltaTime = 0;
+        
+        // Level completion state
+        this.levelCompleteTimer = 0;
+        this.levelCompleteDuration = 2000; // 2 seconds
+        this.showCheckmark = false;
+        this.showLevelCompleteText = false;
+        this.statBoostMessage = '';
+        this.statBoostTimer = 0;
+        
+        // Stage transition state
+        this.stageTransitionTimer = 0;
+        this.stageTransitionDuration = 2000;
+        this.stageTransitionText = '';
+        this.stageTransitionAlpha = 0;
         
         // Game objects
         this.player = null;
         this.bullets = [];
         this.enemies = [];
-        this.powerUps = [];
+        this.energyShards = [];
+        this.weaponDrops = [];
         this.particles = [];
+        this.bosses = [];
+        
+        // Background elements
         this.stars = [];
+        this.backgroundElements = [];
+        this.currentBackground = null;
         
         // Input handling
         this.keys = {};
-        this.mousePos = { x: 0, y: 0 };
+        this.keysPressed = {}; // Track single key presses
         
-        // Game settings
+        // Spawn timers
         this.enemySpawnTimer = 0;
-        this.enemySpawnRate = 2000; // milliseconds
-        this.scrollSpeed = 50;
-        this.backgroundOffset = 0;
+        this.shardSpawnTimer = 0;
+        this.weaponDropTimer = 0;
+        this.weaponDropLevelsSinceLast = 0;
         
         // Audio system
         this.audioEnabled = true;
-        this.sounds = {};
+        this.audioContext = null;
+        
+        // Easter egg
+        this.easterEggTriggered = false;
+        this.easterEggTimer = 0;
+        this.easterEggSequence = '';
         
         this.init();
     }
     
     init() {
         this.setupEventListeners();
-        this.createStarField();
         this.createAudioContext();
         this.player = new Player(this.width / 2, this.height - 100);
+        this.setupStage(1);
         this.gameLoop();
     }
     
     createAudioContext() {
-        // Create simple procedural sound effects using Web Audio API
         try {
             this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
         } catch (e) {
@@ -66,6 +96,38 @@ class Game {
         gainNode.connect(this.audioContext.destination);
         
         switch (type) {
+            case 'shardCollect':
+                oscillator.frequency.setValueAtTime(600, this.audioContext.currentTime);
+                oscillator.frequency.exponentialRampToValueAtTime(800, this.audioContext.currentTime + 0.1);
+                oscillator.type = 'sine';
+                gainNode.gain.setValueAtTime(0.1, this.audioContext.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, this.audioContext.currentTime + 0.1);
+                duration = 0.2;
+                break;
+            case 'levelComplete':
+                oscillator.frequency.setValueAtTime(400, this.audioContext.currentTime);
+                oscillator.frequency.exponentialRampToValueAtTime(600, this.audioContext.currentTime + 0.3);
+                oscillator.type = 'sine';
+                gainNode.gain.setValueAtTime(0.15, this.audioContext.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, this.audioContext.currentTime + 0.3);
+                duration = 0.5;
+                break;
+            case 'weaponUpgrade':
+                oscillator.frequency.setValueAtTime(500, this.audioContext.currentTime);
+                oscillator.frequency.exponentialRampToValueAtTime(700, this.audioContext.currentTime + 0.2);
+                oscillator.type = 'square';
+                gainNode.gain.setValueAtTime(0.12, this.audioContext.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, this.audioContext.currentTime + 0.2);
+                duration = 0.3;
+                break;
+            case 'weaponDrop':
+                oscillator.frequency.setValueAtTime(300, this.audioContext.currentTime);
+                oscillator.frequency.exponentialRampToValueAtTime(500, this.audioContext.currentTime + 0.3);
+                oscillator.type = 'sine';
+                gainNode.gain.setValueAtTime(0.1, this.audioContext.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, this.audioContext.currentTime + 0.3);
+                duration = 0.4;
+                break;
             case 'shoot':
                 oscillator.frequency.setValueAtTime(800, this.audioContext.currentTime);
                 oscillator.frequency.exponentialRampToValueAtTime(400, this.audioContext.currentTime + 0.1);
@@ -81,20 +143,28 @@ class Game {
                 gainNode.gain.exponentialRampToValueAtTime(0.01, this.audioContext.currentTime + 0.3);
                 duration = 0.3;
                 break;
-            case 'powerup':
-                oscillator.frequency.setValueAtTime(400, this.audioContext.currentTime);
-                oscillator.frequency.exponentialRampToValueAtTime(800, this.audioContext.currentTime + 0.2);
-                oscillator.type = 'sine';
-                gainNode.gain.setValueAtTime(0.15, this.audioContext.currentTime);
-                gainNode.gain.exponentialRampToValueAtTime(0.01, this.audioContext.currentTime + 0.2);
-                duration = 0.2;
-                break;
             case 'hit':
                 oscillator.frequency.setValueAtTime(150, this.audioContext.currentTime);
                 oscillator.type = 'square';
                 gainNode.gain.setValueAtTime(0.1, this.audioContext.currentTime);
                 gainNode.gain.exponentialRampToValueAtTime(0.01, this.audioContext.currentTime + 0.05);
                 duration = 0.05;
+                break;
+            case 'bossSpawn':
+                oscillator.frequency.setValueAtTime(100, this.audioContext.currentTime);
+                oscillator.frequency.exponentialRampToValueAtTime(200, this.audioContext.currentTime + 0.8);
+                oscillator.type = 'sawtooth';
+                gainNode.gain.setValueAtTime(0.3, this.audioContext.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, this.audioContext.currentTime + 0.8);
+                duration = 1.0;
+                break;
+            case 'bossDefeated':
+                oscillator.frequency.setValueAtTime(200, this.audioContext.currentTime);
+                oscillator.frequency.exponentialRampToValueAtTime(600, this.audioContext.currentTime + 1.2);
+                oscillator.type = 'sine';
+                gainNode.gain.setValueAtTime(0.25, this.audioContext.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, this.audioContext.currentTime + 1.2);
+                duration = 1.5;
                 break;
         }
         
@@ -103,9 +173,20 @@ class Game {
     }
     
     setupEventListeners() {
-        // Keyboard events
         document.addEventListener('keydown', (e) => {
             this.keys[e.code] = true;
+            this.keysPressed[e.code] = true;
+            
+            // Easter egg detection
+            if (e.key >= '0' && e.key <= '9') {
+                this.easterEggSequence += e.key;
+                if (this.easterEggSequence.length > 3) {
+                    this.easterEggSequence = this.easterEggSequence.slice(-3);
+                }
+                if (this.easterEggSequence === '67' || this.easterEggSequence.includes('6-7')) {
+                    this.triggerEasterEgg();
+                }
+            }
             
             if (e.code === 'KeyP') {
                 this.togglePause();
@@ -120,14 +201,6 @@ class Game {
             this.keys[e.code] = false;
         });
         
-        // Mouse events
-        this.canvas.addEventListener('mousemove', (e) => {
-            const rect = this.canvas.getBoundingClientRect();
-            this.mousePos.x = e.clientX - rect.left;
-            this.mousePos.y = e.clientY - rect.top;
-        });
-        
-        // UI buttons
         document.getElementById('startButton').addEventListener('click', () => {
             this.startGame();
         });
@@ -141,50 +214,178 @@ class Game {
         });
     }
     
-    createStarField() {
+    setupStage(stageNumber) {
+        this.stage = stageNumber;
+        this.level = 1;
+        this.shardsCollectedThisLevel = 0;
+        
+        // Setup background based on stage
+        const stageConfig = this.getStageConfig(stageNumber);
+        this.currentBackground = stageConfig;
+        
+        // Create background elements
+        this.createBackgroundElements(stageNumber);
+        
+        // Reset spawn timers
+        this.enemySpawnTimer = 0;
+        this.shardSpawnTimer = 0;
+        this.weaponDropLevelsSinceLast = 0;
+    }
+    
+    getStageConfig(stageNumber) {
+        const configs = {
+            1: {
+                name: 'Deep Space',
+                baseColor: '#000428',
+                starColor: '#ffffff',
+                nebulaColor: 'rgba(100, 50, 200, 0.3)',
+                parallaxLayers: 3
+            },
+            2: {
+                name: 'Asteroid Field',
+                baseColor: '#1a1a2e',
+                starColor: '#cccccc',
+                nebulaColor: 'rgba(80, 60, 40, 0.4)',
+                parallaxLayers: 2
+            },
+            3: {
+                name: 'Nebula Zone',
+                baseColor: '#2d1b69',
+                starColor: '#ff88ff',
+                nebulaColor: 'rgba(255, 100, 200, 0.5)',
+                parallaxLayers: 3
+            },
+            4: {
+                name: 'Void Sector',
+                baseColor: '#0a0a1a',
+                starColor: '#00ffff',
+                nebulaColor: 'rgba(0, 255, 255, 0.3)',
+                parallaxLayers: 2
+            },
+            5: {
+                name: 'Final Confrontation',
+                baseColor: '#2d0a1a',
+                starColor: '#ff4444',
+                nebulaColor: 'rgba(255, 100, 0, 0.5)',
+                parallaxLayers: 3
+            }
+        };
+        return configs[stageNumber] || configs[1];
+    }
+    
+    createBackgroundElements(stageNumber) {
         this.stars = [];
-        // Far layer - small, slow
-        for (let i = 0; i < 60; i++) {
-            this.stars.push({
-                x: Math.random() * this.width,
-                y: Math.random() * this.height,
-                speed: 20 + Math.random() * 20, // px/sec
-                brightness: Math.random() * 0.4 + 0.1,
-                size: 1
-            });
+        this.backgroundElements = [];
+        
+        const config = this.getStageConfig(stageNumber);
+        const starCount = [60, 45, 30]; // Far, mid, near layers
+        
+        for (let layer = 0; layer < config.parallaxLayers; layer++) {
+            for (let i = 0; i < starCount[layer] || 30; i++) {
+                this.stars.push({
+                    x: Math.random() * this.width,
+                    y: Math.random() * this.height,
+                    speed: (20 + layer * 20) + Math.random() * 20,
+                    brightness: Math.random() * 0.5 + 0.2,
+                    size: 1 + layer,
+                    layer: layer
+                });
+            }
         }
-        // Mid layer - medium
-        for (let i = 0; i < 45; i++) {
-            this.stars.push({
-                x: Math.random() * this.width,
-                y: Math.random() * this.height,
-                speed: 40 + Math.random() * 40,
-                brightness: Math.random() * 0.5 + 0.2,
-                size: 2
-            });
+        
+        // Add stage-specific elements
+        if (stageNumber === 2) {
+            // Asteroids
+            for (let i = 0; i < 10; i++) {
+                this.backgroundElements.push({
+                    type: 'asteroid',
+                    x: Math.random() * this.width,
+                    y: Math.random() * this.height,
+                    size: 20 + Math.random() * 30,
+                    speed: 30 + Math.random() * 20,
+                    rotation: Math.random() * Math.PI * 2
+                });
+            }
+        } else if (stageNumber === 3) {
+            // Nebula clouds
+            for (let i = 0; i < 5; i++) {
+                this.backgroundElements.push({
+                    type: 'nebula',
+                    x: Math.random() * this.width,
+                    y: Math.random() * this.height,
+                    size: 100 + Math.random() * 150,
+                    speed: 10 + Math.random() * 10,
+                    alpha: 0.2 + Math.random() * 0.3
+                });
+            }
+        } else if (stageNumber === 4) {
+            // Energy rifts
+            for (let i = 0; i < 8; i++) {
+                this.backgroundElements.push({
+                    type: 'rift',
+                    x: Math.random() * this.width,
+                    y: Math.random() * this.height,
+                    size: 50 + Math.random() * 80,
+                    speed: 15 + Math.random() * 15,
+                    pulse: Math.random() * Math.PI * 2
+                });
+            }
         }
-        // Near layer - large, fast
-        for (let i = 0; i < 30; i++) {
-            this.stars.push({
-                x: Math.random() * this.width,
-                y: Math.random() * this.height,
-                speed: 70 + Math.random() * 50,
-                brightness: Math.random() * 0.6 + 0.4,
-                size: 3
-            });
-        }
+    }
+    
+    getLevelConfig() {
+        const levelKey = `${this.stage}-${this.level}`;
+        const configs = {
+            '1-1': { enemyTypes: [{type: 'basic', weight: 100}], spawnRate: 3000, speed: 80, shootPercent: 0, split: false },
+            '1-2': { enemyTypes: [{type: 'basic', weight: 80}, {type: 'scout', weight: 20}], spawnRate: 2500, speed: 90, shootPercent: 0, split: false },
+            '1-3': { enemyTypes: [{type: 'basic', weight: 60}, {type: 'scout', weight: 30}, {type: 'zigzag', weight: 10}], spawnRate: 2000, speed: 100, shootPercent: 20, split: false },
+            '1-4': { enemyTypes: [{type: 'basic', weight: 40}, {type: 'scout', weight: 30}, {type: 'zigzag', weight: 20}, {type: 'fast', weight: 10}], spawnRate: 1800, speed: 110, shootPercent: 30, split: true, splitTypes: ['scout', 'basic'] },
+            '1-5': { enemyTypes: [{type: 'basic', weight: 50}, {type: 'scout', weight: 30}, {type: 'zigzag', weight: 20}], spawnRate: 3000, speed: 110, shootPercent: 30, split: false, boss: 'Stage1_Boss' },
+            '2-1': { enemyTypes: [{type: 'basic', weight: 50}, {type: 'zigzag', weight: 30}, {type: 'fast', weight: 20}], spawnRate: 2200, speed: 120, shootPercent: 25, split: false },
+            '2-2': { enemyTypes: [{type: 'zigzag', weight: 40}, {type: 'fast', weight: 30}, {type: 'fighter', weight: 20}, {type: 'sidewinder', weight: 10}], spawnRate: 2000, speed: 130, shootPercent: 35, split: false },
+            '2-3': { enemyTypes: [{type: 'zigzag', weight: 30}, {type: 'fast', weight: 25}, {type: 'fighter', weight: 25}, {type: 'sidewinder', weight: 20}], spawnRate: 1800, speed: 140, shootPercent: 40, split: false },
+            '2-4': { enemyTypes: [{type: 'fast', weight: 30}, {type: 'fighter', weight: 25}, {type: 'sidewinder', weight: 25}, {type: 'hunter', weight: 20}], spawnRate: 1600, speed: 150, shootPercent: 45, split: true, splitTypes: ['zigzag', 'fast'] },
+            '2-5': { enemyTypes: [{type: 'zigzag', weight: 40}, {type: 'fast', weight: 30}, {type: 'fighter', weight: 30}], spawnRate: 3500, speed: 150, shootPercent: 45, split: false, boss: 'Stage2_Boss' },
+            '3-1': { enemyTypes: [{type: 'fighter', weight: 40}, {type: 'sidewinder', weight: 30}, {type: 'hunter', weight: 25}, {type: 'bomber', weight: 5}], spawnRate: 1800, speed: 160, shootPercent: 50, split: false },
+            '3-2': { enemyTypes: [{type: 'sidewinder', weight: 35}, {type: 'hunter', weight: 30}, {type: 'bomber', weight: 20}, {type: 'heavy', weight: 15}], spawnRate: 1600, speed: 170, shootPercent: 55, split: false },
+            '3-3': { enemyTypes: [{type: 'hunter', weight: 30}, {type: 'bomber', weight: 25}, {type: 'heavy', weight: 25}, {type: 'spiral', weight: 20}], spawnRate: 1500, speed: 180, shootPercent: 60, split: false },
+            '3-4': { enemyTypes: [{type: 'bomber', weight: 30}, {type: 'heavy', weight: 25}, {type: 'spiral', weight: 25}, {type: 'turret', weight: 20}], spawnRate: 1400, speed: 190, shootPercent: 65, split: true, splitTypes: ['hunter', 'bomber'] },
+            '3-5': { enemyTypes: [{type: 'hunter', weight: 40}, {type: 'bomber', weight: 30}, {type: 'heavy', weight: 30}], spawnRate: 4000, speed: 190, shootPercent: 65, split: false, boss: 'Stage3_Boss' },
+            '4-1': { enemyTypes: [{type: 'heavy', weight: 35}, {type: 'spiral', weight: 30}, {type: 'turret', weight: 25}, {type: 'elite_hunter', weight: 10}], spawnRate: 1500, speed: 200, shootPercent: 70, split: false },
+            '4-2': { enemyTypes: [{type: 'spiral', weight: 30}, {type: 'turret', weight: 30}, {type: 'elite_hunter', weight: 25}, {type: 'elite_bomber', weight: 15}], spawnRate: 1400, speed: 210, shootPercent: 75, split: false },
+            '4-3': { enemyTypes: [{type: 'turret', weight: 30}, {type: 'elite_hunter', weight: 30}, {type: 'elite_bomber', weight: 25}, {type: 'elite_spiral', weight: 15}], spawnRate: 1300, speed: 220, shootPercent: 80, split: false },
+            '4-4': { enemyTypes: [{type: 'elite_hunter', weight: 35}, {type: 'elite_bomber', weight: 30}, {type: 'elite_spiral', weight: 25}, {type: 'heavy', weight: 10}], spawnRate: 1200, speed: 230, shootPercent: 85, split: true, splitTypes: ['elite_hunter', 'elite_bomber'] },
+            '4-5': { enemyTypes: [{type: 'elite_hunter', weight: 40}, {type: 'elite_bomber', weight: 30}, {type: 'elite_spiral', weight: 30}], spawnRate: 4500, speed: 230, shootPercent: 85, split: false, boss: 'Stage4_Boss' },
+            '5-1': { enemyTypes: [{type: 'elite_hunter', weight: 40}, {type: 'elite_bomber', weight: 35}, {type: 'elite_spiral', weight: 25}], spawnRate: 1200, speed: 240, shootPercent: 90, split: false },
+            '5-2': { enemyTypes: [{type: 'elite_bomber', weight: 40}, {type: 'elite_spiral', weight: 35}, {type: 'elite_hunter', weight: 25}], spawnRate: 1100, speed: 250, shootPercent: 95, split: false },
+            '5-3': { enemyTypes: [{type: 'elite_spiral', weight: 40}, {type: 'elite_hunter', weight: 35}, {type: 'elite_bomber', weight: 25}], spawnRate: 1000, speed: 260, shootPercent: 100, split: false },
+            '5-4': { enemyTypes: [{type: 'elite_hunter', weight: 34}, {type: 'elite_bomber', weight: 33}, {type: 'elite_spiral', weight: 33}], spawnRate: 900, speed: 270, shootPercent: 100, split: true, splitTypes: ['elite_hunter', 'elite_bomber', 'elite_spiral'] },
+            '5-5': { enemyTypes: [{type: 'elite_hunter', weight: 40}, {type: 'elite_bomber', weight: 30}, {type: 'elite_spiral', weight: 30}], spawnRate: 5000, speed: 270, shootPercent: 100, split: false, boss: 'Stage5_FinalBoss' }
+        };
+        
+        return configs[levelKey] || configs['1-1'];
     }
     
     startGame() {
         this.gameState = 'playing';
         this.score = 0;
+        this.stage = 1;
         this.level = 1;
+        this.totalShardsCollected = 0;
+        this.shardsCollectedThisLevel = 0;
         this.bullets = [];
         this.enemies = [];
-        this.powerUps = [];
+        this.energyShards = [];
+        this.weaponDrops = [];
         this.particles = [];
+        this.bosses = [];
         this.player = new Player(this.width / 2, this.height - 100);
+        this.setupStage(1);
         this.enemySpawnTimer = 0;
+        this.shardSpawnTimer = 0;
+        this.weaponDropLevelsSinceLast = 0;
+        this.easterEggTriggered = false;
+        this.easterEggSequence = '';
         
         document.getElementById('startScreen').classList.add('hidden');
         document.getElementById('gameOverScreen').classList.add('hidden');
@@ -223,29 +424,207 @@ class Game {
         }
     }
     
+    completeLevel() {
+        this.gameState = 'levelComplete';
+        this.levelCompleteTimer = 0;
+        this.showCheckmark = true;
+        this.showLevelCompleteText = true;
+        
+        // Apply random stat boost
+        this.applyRandomStatBoost();
+        
+        // Play level complete sound
+        this.playSound('levelComplete');
+        
+        // Freeze gameplay briefly
+        setTimeout(() => {
+            // Check if we need to transition to next stage
+            if (this.level >= 5) {
+                // Move to next stage
+                if (this.stage < 5) {
+                    this.transitionToStage(this.stage + 1);
+                } else {
+                    // Game complete!
+                    this.gameState = 'victory';
+                    // Could show victory screen here
+                }
+            } else {
+                // Move to next level in same stage
+                this.level++;
+                this.shardsCollectedThisLevel = 0;
+                this.gameState = 'playing';
+                
+                // Spawn boss if this is level 5
+                const levelConfig = this.getLevelConfig();
+                if (levelConfig.boss) {
+                    this.spawnBoss(levelConfig.boss);
+                }
+            }
+        }, 500); // 0.5 second freeze
+    }
+    
+    transitionToStage(newStage) {
+        this.gameState = 'stageTransition';
+        this.stageTransitionTimer = 0;
+        this.stageTransitionAlpha = 0;
+        const stageConfig = this.getStageConfig(newStage);
+        this.stageTransitionText = `STAGE ${newStage} - ${stageConfig.name.toUpperCase()}`;
+        
+        setTimeout(() => {
+            this.setupStage(newStage);
+            this.level = 1;
+            this.shardsCollectedThisLevel = 0;
+            this.gameState = 'playing';
+            
+            // Check for major boss
+            if (newStage === 3) {
+                // Major Boss 1 after Stage 2
+                this.spawnMajorBoss('Asteroid_Crusher');
+            } else if (newStage === 5) {
+                // Major Boss 2 after Stage 4
+                this.spawnMajorBoss('Void_Reaper');
+            }
+        }, this.stageTransitionDuration);
+    }
+    
+    applyRandomStatBoost() {
+        const boosts = [
+            { type: 'damage', min: 5, max: 15, unit: '%' },
+            { type: 'speed', min: 5, max: 15, unit: '%' },
+            { type: 'fireRate', min: 5, max: 15, unit: '%' },
+            { type: 'health', min: 10, max: 30, unit: '' },
+            { type: 'collectionRange', min: 5, max: 15, unit: 'px' }
+        ];
+        
+        const boost = boosts[Math.floor(Math.random() * boosts.length)];
+        const value = boost.min + Math.floor(Math.random() * (boost.max - boost.min + 1));
+        
+        switch (boost.type) {
+            case 'damage':
+                this.player.upgrades.damage += value / 100;
+                this.statBoostMessage = `+${value}${boost.unit} Damage`;
+                break;
+            case 'speed':
+                this.player.upgrades.speed += value / 100;
+                this.statBoostMessage = `+${value}${boost.unit} Speed`;
+                break;
+            case 'fireRate':
+                this.player.upgrades.fireRate += value / 100;
+                this.statBoostMessage = `+${value}${boost.unit} Fire Rate`;
+                break;
+            case 'health':
+                this.player.maxHealth += value;
+                this.player.health = Math.min(this.player.maxHealth, this.player.health + value);
+                this.statBoostMessage = `+${value} Max Health`;
+                break;
+            case 'collectionRange':
+                this.player.collectionRange += value;
+                this.statBoostMessage = `+${value}${boost.unit} Collection Range`;
+                break;
+        }
+        
+        this.statBoostTimer = 2000;
+    }
+    
+    spawnBoss(bossType) {
+        const boss = new Boss(this.width / 2, 100, bossType, this.player);
+        this.bosses.push(boss);
+        this.playSound('bossSpawn');
+    }
+    
+    spawnMajorBoss(bossType) {
+        // Major bosses appear between stages
+        const boss = new Boss(this.width / 2, 100, bossType, this.player);
+        this.bosses.push(boss);
+        this.playSound('bossSpawn');
+    }
+    
+    spawnEnemy() {
+        const levelConfig = this.getLevelConfig();
+        
+        // Select enemy type based on weights
+        let totalWeight = 0;
+        levelConfig.enemyTypes.forEach(et => totalWeight += et.weight);
+        
+        let random = Math.random() * totalWeight;
+        let selectedType = 'basic';
+        for (const et of levelConfig.enemyTypes) {
+            if (random < et.weight) {
+                selectedType = et.type;
+                break;
+            }
+            random -= et.weight;
+        }
+        
+        const x = 20 + Math.random() * (this.width - 40);
+        const enemy = new Enemy(x, -50, selectedType, this.player, levelConfig);
+        
+        // 30% chance enemy carries a shard
+        if (Math.random() < 0.3) {
+            enemy.carriesShard = true;
+        }
+        
+        this.enemies.push(enemy);
+    }
+    
+    spawnEnergyShard(x = null, y = -20) {
+        if (x === null) {
+            x = 20 + Math.random() * (this.width - 40);
+        }
+        const fallSpeed = 150 + Math.random() * 50; // 150-200 pixels/second
+        const shard = new EnergyShard(x, y, fallSpeed);
+        this.energyShards.push(shard);
+    }
+    
+    spawnWeaponDrop() {
+        // Get available weapons (exclude current weapon)
+        const availableWeapons = WeaponSystem.getAvailableWeapons(this.player.currentWeaponType);
+        if (availableWeapons.length === 0) return;
+        
+        const weaponType = availableWeapons[Math.floor(Math.random() * availableWeapons.length)];
+        const x = 20 + Math.random() * (this.width - 40);
+        const weaponDrop = new WeaponDrop(x, -30, weaponType);
+        this.weaponDrops.push(weaponDrop);
+        this.playSound('weaponDrop');
+    }
+    
     update(deltaTime) {
+        if (this.gameState === 'levelComplete') {
+            this.levelCompleteTimer += deltaTime;
+            
+            if (this.levelCompleteTimer > this.levelCompleteDuration) {
+                this.showLevelCompleteText = false;
+                this.showCheckmark = false;
+            }
+            
+            if (this.statBoostTimer > 0) {
+                this.statBoostTimer -= deltaTime;
+            }
+            return;
+        }
+        
+        if (this.gameState === 'stageTransition') {
+            this.stageTransitionTimer += deltaTime;
+            
+            // Fade in text
+            if (this.stageTransitionTimer < 1000) {
+                this.stageTransitionAlpha = Math.min(1, this.stageTransitionTimer / 1000);
+            }
+            // Hold
+            else if (this.stageTransitionTimer < this.stageTransitionDuration - 500) {
+                this.stageTransitionAlpha = 1;
+            }
+            // Fade out
+            else {
+                this.stageTransitionAlpha = Math.max(0, 1 - (this.stageTransitionTimer - (this.stageTransitionDuration - 500)) / 500);
+            }
+            return;
+        }
+        
         if (this.gameState !== 'playing') return;
         
         // Update background
-        this.backgroundOffset += this.scrollSpeed * deltaTime / 1000;
-        if (this.backgroundOffset > this.height) {
-            this.backgroundOffset = 0;
-        }
-        
-        // Update stars (parallax) and background offset
-        const speedBoost = this.player ? (this.player.upgrades?.speed || 1) : 1;
-        this.backgroundOffset += (this.scrollSpeed * 0.6 * speedBoost) * deltaTime / 1000;
-        if (this.backgroundOffset > this.height) {
-            this.backgroundOffset -= this.height;
-        }
-
-        this.stars.forEach(star => {
-            star.y += star.speed * speedBoost * deltaTime / 1000;
-            if (star.y > this.height) {
-                star.y = 0;
-                star.x = Math.random() * this.width;
-            }
-        });
+        this.updateBackground(deltaTime);
         
         // Update player
         this.player.update(deltaTime, this.keys);
@@ -253,7 +632,7 @@ class Game {
         // Update bullets
         this.bullets = this.bullets.filter(bullet => {
             bullet.update(deltaTime);
-            return bullet.y > -10 && bullet.y < this.height + 10;
+            return bullet.y > -50 && bullet.y < this.height + 50 && bullet.x > -50 && bullet.x < this.width + 50;
         });
         
         // Update enemies
@@ -262,10 +641,16 @@ class Game {
             return enemy.y < this.height + 50 && enemy.health > 0;
         });
         
-        // Update power-ups
-        this.powerUps = this.powerUps.filter(powerUp => {
-            powerUp.update(deltaTime);
-            return powerUp.y < this.height + 50;
+        // Update energy shards
+        this.energyShards = this.energyShards.filter(shard => {
+            shard.update(deltaTime);
+            return shard.y < this.height + 50;
+        });
+        
+        // Update weapon drops
+        this.weaponDrops = this.weaponDrops.filter(drop => {
+            drop.update(deltaTime);
+            return drop.y < this.height + 50;
         });
         
         // Update particles
@@ -274,48 +659,92 @@ class Game {
             return particle.life > 0;
         });
         
+        // Update bosses
+        this.bosses = this.bosses.filter(boss => {
+            boss.update(deltaTime);
+            return boss.health > 0;
+        });
+        
         // Spawn enemies
+        const levelConfig = this.getLevelConfig();
         this.enemySpawnTimer += deltaTime;
-        if (this.enemySpawnTimer > this.enemySpawnRate) {
+        const spawnRate = levelConfig.spawnRate * (0.8 + Math.random() * 0.4); // ±20% variation
+        if (this.enemySpawnTimer > spawnRate) {
             this.spawnEnemy();
             this.enemySpawnTimer = 0;
-            
-            // Increase difficulty over time
-            if (this.enemySpawnRate > 500) {
-                this.enemySpawnRate -= 10;
+        }
+        
+        // Spawn energy shards (70% random falling)
+        // Spawn rate: 1 shard every 2-3 seconds (randomized)
+        this.shardSpawnTimer += deltaTime;
+        const shardSpawnInterval = 2000 + Math.random() * 1000; // 2-3 seconds
+        if (this.shardSpawnTimer > shardSpawnInterval && this.shardsCollectedThisLevel < this.shardsNeeded) {
+            // Only spawn if we haven't collected all shards yet
+            const shardsRemaining = this.shardsNeeded - this.shardsCollectedThisLevel;
+            const randomShardsNeeded = Math.ceil(shardsRemaining * 0.7); // 70% should be random
+            if (this.energyShards.length < randomShardsNeeded) {
+                this.spawnEnergyShard();
+                this.shardSpawnTimer = 0;
+            }
+        }
+        
+        // Spawn weapon drops (every 3-4 levels)
+        this.weaponDropLevelsSinceLast++;
+        if (this.weaponDropLevelsSinceLast >= 3) {
+            if (this.weaponDropLevelsSinceLast === 3 && Math.random() < 0.3) {
+                // 30% chance at level 3
+                this.spawnWeaponDrop();
+                this.weaponDropLevelsSinceLast = 0;
+            } else if (this.weaponDropLevelsSinceLast >= 4) {
+                // Guaranteed by level 4
+                this.spawnWeaponDrop();
+                this.weaponDropLevelsSinceLast = 0;
             }
         }
         
         // Check collisions
         this.checkCollisions();
         
-        // Update level
-        if (this.score > this.level * 1000) {
-            this.level++;
-            this.updateUI();
+        // Check level completion
+        if (this.shardsCollectedThisLevel >= this.shardsNeeded) {
+            this.completeLevel();
         }
         
         // Check game over
         if (this.player.health <= 0) {
             this.gameOver();
         }
+        
+        // Easter egg check
+        if (this.totalShardsCollected === 67 && !this.easterEggTriggered) {
+            this.triggerEasterEgg();
+        }
     }
     
-    spawnEnemy() {
-        const enemyTypes = [
-            // Basic enemies (weak)
-            'scout', 'drone', 'fighter',
-            // Medium enemies
-            'basic', 'fast', 'zigzag', 'sidewinder',
-            // Strong enemies
-            'heavy', 'hunter', 'bomber', 'spiral', 'turret',
-            // Elite enemies (rare)
-            'elite_hunter', 'elite_bomber', 'elite_spiral'
-        ];
+    updateBackground(deltaTime) {
+        const speedBoost = this.player ? (this.player.upgrades?.speed || 1) : 1;
         
-        const type = enemyTypes[Math.floor(Math.random() * enemyTypes.length)];
-        const x = Math.random() * (this.width - 60) + 30;
-        this.enemies.push(new Enemy(x, -50, type, this.player));
+        this.stars.forEach(star => {
+            star.y += star.speed * speedBoost * deltaTime / 1000;
+            if (star.y > this.height) {
+                star.y = 0;
+                star.x = Math.random() * this.width;
+            }
+        });
+        
+        this.backgroundElements.forEach(elem => {
+            elem.y += elem.speed * speedBoost * deltaTime / 1000;
+            if (elem.y > this.height) {
+                elem.y = -50;
+                elem.x = Math.random() * this.width;
+            }
+            if (elem.rotation !== undefined) {
+                elem.rotation += deltaTime / 1000 * 0.5;
+            }
+            if (elem.pulse !== undefined) {
+                elem.pulse += deltaTime / 1000;
+            }
+        });
     }
     
     checkCollisions() {
@@ -324,27 +753,63 @@ class Game {
             if (bullet.owner === 'player') {
                 this.enemies.forEach((enemy, enemyIndex) => {
                     if (this.isColliding(bullet, enemy)) {
-                        // Create explosion particles
-                        this.createExplosion(enemy.x, enemy.y, '#ff4444');
-                        
-                        // Damage enemy
                         enemy.takeDamage(bullet.damage);
-                        
-                        // Remove bullet
-                        this.bullets.splice(bulletIndex, 1);
-                        
-                        // Play hit sound
+                        this.createExplosion(enemy.x + enemy.width/2, enemy.y + enemy.height/2, '#ff4444');
                         this.playSound('hit');
                         
-                        // If enemy is destroyed
+                        // Remove bullet (unless piercing)
+                        if (!bullet.piercing || bullet.pierceCount <= 0) {
+                            this.bullets.splice(bulletIndex, 1);
+                        } else {
+                            bullet.pierceCount--;
+                        }
+                        
+                        // If enemy destroyed
                         if (enemy.health <= 0) {
                             this.score += enemy.points;
-                            this.updateUI();
                             this.playSound('explosion');
                             
-                            // Chance to drop power-up
-                            if (Math.random() < 0.1) {
-                                this.powerUps.push(new PowerUp(enemy.x, enemy.y));
+                            // Drop shard if enemy was carrying one
+                            if (enemy.carriesShard) {
+                                this.spawnEnergyShard(enemy.x + enemy.width/2, enemy.y + enemy.height/2);
+                            }
+                            
+                            // Handle enemy splitting
+                            const levelConfig = this.getLevelConfig();
+                            if (levelConfig.split && levelConfig.splitTypes.includes(enemy.type)) {
+                                this.splitEnemy(enemy);
+                            }
+                            
+                            // Chance for health pickup
+                            if (Math.random() < 0.05 && !enemy.carriesShard) {
+                                // Could spawn health pickup here
+                            }
+                        }
+                    }
+                });
+                
+                // Player bullets vs bosses
+                this.bosses.forEach((boss, bossIndex) => {
+                    if (this.isColliding(bullet, boss)) {
+                        boss.takeDamage(bullet.damage);
+                        this.createExplosion(bullet.x, bullet.y, '#ff8844');
+                        this.playSound('hit');
+                        
+                        if (!bullet.piercing || bullet.pierceCount <= 0) {
+                            this.bullets.splice(bulletIndex, 1);
+                        } else {
+                            bullet.pierceCount--;
+                        }
+                        
+                        if (boss.health <= 0) {
+                            this.score += boss.points;
+                            this.playSound('bossDefeated');
+                            
+                            // Boss drops shards
+                            for (let i = 0; i < boss.shardDrops; i++) {
+                                setTimeout(() => {
+                                    this.spawnEnergyShard(boss.x + boss.width/2 + (Math.random() - 0.5) * 40, boss.y + boss.height/2);
+                                }, i * 200);
                             }
                         }
                     }
@@ -357,7 +822,7 @@ class Game {
             if (bullet.owner === 'enemy' && this.isColliding(bullet, this.player)) {
                 this.player.takeDamage(bullet.damage);
                 this.bullets.splice(bulletIndex, 1);
-                this.createExplosion(this.player.x, this.player.y, '#44ff44');
+                this.createExplosion(this.player.x + this.player.width/2, this.player.y + this.player.height/2, '#44ff44');
                 this.updateUI();
             }
         });
@@ -367,20 +832,76 @@ class Game {
             if (this.isColliding(enemy, this.player)) {
                 this.player.takeDamage(20);
                 enemy.takeDamage(50);
-                this.createExplosion(enemy.x, enemy.y, '#ffff44');
+                this.createExplosion(enemy.x + enemy.width/2, enemy.y + enemy.height/2, '#ffff44');
                 this.updateUI();
             }
         });
         
-        // Power-ups vs player
-        this.powerUps.forEach((powerUp, index) => {
-            if (this.isColliding(powerUp, this.player)) {
-                powerUp.apply(this.player);
-                this.powerUps.splice(index, 1);
-                this.playSound('powerup');
+        // Bosses vs player
+        this.bosses.forEach(boss => {
+            if (this.isColliding(boss, this.player)) {
+                this.player.takeDamage(30);
+                this.createExplosion(this.player.x + this.player.width/2, this.player.y + this.player.height/2, '#ff4444');
                 this.updateUI();
             }
         });
+        
+        // Energy shards vs player
+        this.energyShards.forEach((shard, index) => {
+            const dx = shard.x - (this.player.x + this.player.width/2);
+            const dy = shard.y - (this.player.y + this.player.height/2);
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            
+            if (distance < this.player.collectionRange) {
+                this.collectShard(shard);
+                this.energyShards.splice(index, 1);
+            }
+        });
+        
+        // Weapon drops vs player
+        this.weaponDrops.forEach((drop, index) => {
+            const dx = drop.x - (this.player.x + this.player.width/2);
+            const dy = drop.y - (this.player.y + this.player.height/2);
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            
+            if (distance < 40) {
+                this.player.collectWeapon(drop.weaponType);
+                this.weaponDrops.splice(index, 1);
+                this.playSound('weaponUpgrade');
+            }
+        });
+    }
+    
+    collectShard(shard) {
+        this.shardsCollectedThisLevel++;
+        this.totalShardsCollected++;
+        this.playSound('shardCollect');
+        this.createExplosion(shard.x, shard.y, '#00ffff', 20);
+        this.updateUI();
+        
+        // Easter egg check
+        if (this.totalShardsCollected === 67 && !this.easterEggTriggered) {
+            this.triggerEasterEgg();
+        }
+    }
+    
+    splitEnemy(enemy) {
+        // Create 2 smaller enemies
+        for (let i = 0; i < 2; i++) {
+            const splitEnemy = new Enemy(
+                enemy.x + (i - 0.5) * 20,
+                enemy.y + enemy.height/2,
+                enemy.type,
+                this.player,
+                this.getLevelConfig()
+            );
+            splitEnemy.width = enemy.width / 2;
+            splitEnemy.height = enemy.height / 2;
+            splitEnemy.health = Math.floor(enemy.maxHealth / 2);
+            splitEnemy.maxHealth = splitEnemy.health;
+            splitEnemy.speed = enemy.speed * 1.2; // Slightly faster
+            this.enemies.push(splitEnemy);
+        }
     }
     
     isColliding(obj1, obj2) {
@@ -390,70 +911,190 @@ class Game {
                obj1.y + obj1.height > obj2.y;
     }
     
-    createExplosion(x, y, color) {
-        for (let i = 0; i < 10; i++) {
+    createExplosion(x, y, color, count = 10) {
+        for (let i = 0; i < count; i++) {
             this.particles.push(new Particle(x, y, color));
         }
     }
     
+    triggerEasterEgg() {
+        this.easterEggTriggered = true;
+        this.easterEggTimer = 3000; // 3 seconds
+        this.createExplosion(this.width/2, this.height/2, '#ff00ff', 100);
+    }
+    
     render() {
-        // Clear canvas
-        this.ctx.fillStyle = 'rgba(0, 4, 40, 1)';
-        this.ctx.fillRect(0, 0, this.width, this.height);
-
-        // Draw background speed streaks using backgroundOffset
-        this.drawBackground(this.ctx);
-
-        // Draw parallax stars with varying sizes
-        this.ctx.fillStyle = '#ffffff';
-        this.stars.forEach(star => {
-            this.ctx.globalAlpha = star.brightness;
-            this.ctx.fillRect(star.x, star.y, star.size, star.size);
-        });
-        this.ctx.globalAlpha = 1;
+        const ctx = this.ctx;
         
-        if (this.gameState === 'playing' || this.gameState === 'paused') {
+        // Clear canvas with stage background
+        const bg = this.currentBackground;
+        ctx.fillStyle = bg.baseColor;
+        ctx.fillRect(0, 0, this.width, this.height);
+        
+        // Draw background elements
+        this.drawBackground(ctx);
+        
+        if (this.gameState === 'playing' || this.gameState === 'paused' || this.gameState === 'levelComplete') {
             // Draw game objects
-            this.player.render(this.ctx);
+            this.player.render(ctx);
             
-            this.bullets.forEach(bullet => bullet.render(this.ctx));
-            this.enemies.forEach(enemy => enemy.render(this.ctx));
-            this.powerUps.forEach(powerUp => powerUp.render(this.ctx));
-            this.particles.forEach(particle => particle.render(this.ctx));
+            this.bullets.forEach(bullet => bullet.render(ctx));
+            this.enemies.forEach(enemy => enemy.render(ctx));
+            this.energyShards.forEach(shard => shard.render(ctx));
+            this.weaponDrops.forEach(drop => drop.render(ctx));
+            this.particles.forEach(particle => particle.render(ctx));
+            this.bosses.forEach(boss => boss.render(ctx));
+            
+            // Draw level complete effects
+            if (this.gameState === 'levelComplete') {
+                this.drawLevelCompleteEffects(ctx);
+            }
+        }
+        
+        // Draw stage transition
+        if (this.gameState === 'stageTransition') {
+            this.drawStageTransition(ctx);
+        }
+        
+        // Draw easter egg
+        if (this.easterEggTimer > 0) {
+            this.drawEasterEgg(ctx);
         }
     }
-
+    
     drawBackground(ctx) {
-        // Subtle forward motion streaks and horizon bands
-        const offset = this.backgroundOffset % this.height;
-
-        // Horizon bands
-        ctx.save();
-        const bandHeight = 80;
-        const grad = ctx.createLinearGradient(0, this.height - bandHeight, 0, this.height);
-        grad.addColorStop(0, 'rgba(0, 20, 80, 0.0)');
-        grad.addColorStop(1, 'rgba(0, 40, 120, 0.25)');
-        ctx.fillStyle = grad;
-        ctx.fillRect(0, this.height - bandHeight, this.width, bandHeight);
-
-        // Moving streak lines
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
-        ctx.lineWidth = 2;
-        const spacing = 40;
-        for (let y = -spacing; y < this.height + spacing; y += spacing) {
-            const lineY = ((y + offset) % (this.height + spacing)) - spacing;
-            ctx.beginPath();
-            ctx.moveTo(0, lineY);
-            ctx.lineTo(this.width, lineY);
-            ctx.stroke();
+        const bg = this.currentBackground;
+        
+        // Draw stars
+        ctx.fillStyle = bg.starColor;
+        this.stars.forEach(star => {
+            ctx.globalAlpha = star.brightness;
+            ctx.fillRect(star.x, star.y, star.size, star.size);
+        });
+        ctx.globalAlpha = 1;
+        
+        // Draw nebula overlay
+        if (bg.nebulaColor) {
+            const grad = ctx.createLinearGradient(0, 0, 0, this.height);
+            grad.addColorStop(0, 'transparent');
+            grad.addColorStop(0.5, bg.nebulaColor);
+            grad.addColorStop(1, 'transparent');
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 0, this.width, this.height);
         }
+        
+        // Draw stage-specific elements
+        this.backgroundElements.forEach(elem => {
+            ctx.save();
+            if (elem.type === 'asteroid') {
+                ctx.translate(elem.x, elem.y);
+                ctx.rotate(elem.rotation);
+                ctx.fillStyle = '#8B7355';
+                ctx.beginPath();
+                ctx.arc(0, 0, elem.size/2, 0, Math.PI * 2);
+                ctx.fill();
+            } else if (elem.type === 'nebula') {
+                ctx.globalAlpha = elem.alpha;
+                const grad = ctx.createRadialGradient(elem.x, elem.y, 0, elem.x, elem.y, elem.size);
+                grad.addColorStop(0, 'rgba(255, 100, 200, 0.8)');
+                grad.addColorStop(1, 'transparent');
+                ctx.fillStyle = grad;
+                ctx.fillRect(elem.x - elem.size, elem.y - elem.size, elem.size * 2, elem.size * 2);
+            } else if (elem.type === 'rift') {
+                ctx.globalAlpha = 0.5 + 0.3 * Math.sin(elem.pulse);
+                ctx.strokeStyle = '#00ffff';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.arc(elem.x, elem.y, elem.size/2, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+            ctx.restore();
+        });
+    }
+    
+    drawLevelCompleteEffects(ctx) {
+        // Checkmark
+        if (this.showCheckmark) {
+            const checkX = this.width - 150;
+            const checkY = 30;
+            const scale = Math.min(1.2, this.levelCompleteTimer / 500);
+            ctx.save();
+            ctx.translate(checkX, checkY);
+            ctx.scale(scale, scale);
+            ctx.strokeStyle = '#00ff00';
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.moveTo(-10, 0);
+            ctx.lineTo(-3, 7);
+            ctx.lineTo(10, -7);
+            ctx.stroke();
+            ctx.restore();
+        }
+        
+        // Level complete text
+        if (this.showLevelCompleteText) {
+            const alpha = Math.min(1, this.levelCompleteTimer / 500);
+            ctx.save();
+            ctx.globalAlpha = alpha;
+            ctx.fillStyle = '#00ff00';
+            ctx.font = 'bold 48px Courier New';
+            ctx.textAlign = 'center';
+            ctx.fillText('LEVEL COMPLETE!', this.width/2, this.height/2);
+            ctx.restore();
+        }
+        
+        // Stat boost message
+        if (this.statBoostTimer > 0) {
+            ctx.save();
+            ctx.globalAlpha = Math.min(1, this.statBoostTimer / 500);
+            ctx.fillStyle = '#ffff00';
+            ctx.font = 'bold 24px Courier New';
+            ctx.textAlign = 'right';
+            ctx.fillText(this.statBoostMessage, this.width - 20, this.height - 20);
+            ctx.restore();
+        }
+        
+        // Particle burst
+        if (this.levelCompleteTimer < 100) {
+            this.createExplosion(this.player.x + this.player.width/2, this.player.y + this.player.height/2, '#00ffff', 50);
+        }
+    }
+    
+    drawStageTransition(ctx) {
+        ctx.save();
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
+        ctx.fillRect(0, 0, this.width, this.height);
+        
+        ctx.globalAlpha = this.stageTransitionAlpha;
+        ctx.fillStyle = '#00ff00';
+        ctx.font = 'bold 36px Courier New';
+        ctx.textAlign = 'center';
+        ctx.fillText(this.stageTransitionText, this.width/2, this.height/2);
         ctx.restore();
+    }
+    
+    drawEasterEgg(ctx) {
+        ctx.save();
+        ctx.fillStyle = 'rgba(255, 0, 255, 0.3)';
+        ctx.fillRect(0, 0, this.width, this.height);
+        
+        ctx.fillStyle = '#ff00ff';
+        ctx.font = 'bold 72px Courier New';
+        ctx.textAlign = 'center';
+        ctx.fillText('6-7', this.width/2, this.height/2 - 50);
+        
+        ctx.font = 'bold 24px Courier New';
+        ctx.fillText('You found it: 6-7 — payback is a hug!', this.width/2, this.height/2 + 50);
+        ctx.restore();
+        
+        this.easterEggTimer -= this.deltaTime;
     }
     
     updateUI() {
         document.getElementById('scoreValue').textContent = this.score;
-        document.getElementById('levelValue').textContent = this.level;
-        document.getElementById('weaponType').textContent = this.player.weaponType;
+        document.getElementById('levelValue').textContent = `${this.stage}-${this.level}`;
+        document.getElementById('weaponType').textContent = `${this.player.weaponName} Lv.${this.player.weaponLevel}`;
+        document.getElementById('shardCount').textContent = `${this.shardsCollectedThisLevel}/${this.shardsNeeded}`;
         
         const healthPercent = (this.player.health / this.player.maxHealth) * 100;
         document.getElementById('healthFill').style.width = healthPercent + '%';
@@ -470,36 +1111,38 @@ class Game {
     }
 }
 
-// Player class
+// Continue with Player, Enemy, EnergyShard, WeaponDrop, Boss, Bullet, Particle classes...
+// Due to length, I'll continue in the next part
+
+// Player class with new weapon system
 class Player {
     constructor(x, y) {
         this.x = x;
         this.y = y;
         this.width = 40;
         this.height = 40;
-        this.speed = 300;
+        this.baseSpeed = 300;
         this.health = 100;
         this.maxHealth = 100;
-        this.weaponType = 'Pulse Cannon';
-        this.fireRate = 200; // milliseconds
-        this.lastShot = 0;
+        this.collectionRange = 30;
+        
+        // Weapon system
+        this.currentWeaponType = 'pistol';
         this.weaponLevel = 1;
-        this.currentWeapon = 0; // Index of current weapon
-        this.weapons = ['pulse', 'laser', 'spread', 'homing'];
-        this.weaponNames = ['Pulse Cannon', 'Laser Beam', 'Spread Shot', 'Homing Missile'];
-        this.specialWeaponCooldown = 0;
-        this.specialWeaponMaxCooldown = 5000; // 5 seconds
+        this.weaponName = 'Pistol';
+        this.lastShot = 0;
+        
+        // Upgrades (permanent stat boosts)
         this.upgrades = {
             speed: 1,
-            health: 1,
+            damage: 1,
             fireRate: 1,
-            damage: 1
+            health: 1
         };
     }
     
     update(deltaTime, keys) {
-        // Apply speed upgrades
-        const currentSpeed = this.speed * this.upgrades.speed;
+        const currentSpeed = this.baseSpeed * this.upgrades.speed;
         
         // Movement
         if (keys['ArrowLeft'] || keys['KeyA']) {
@@ -515,114 +1158,46 @@ class Player {
             this.y += currentSpeed * deltaTime / 1000;
         }
         
-        // Keep player in bounds
+        // Keep in bounds
         this.x = Math.max(0, Math.min(this.x, game.width - this.width));
         this.y = Math.max(0, Math.min(this.y, game.height - this.height));
-        
-        // Weapon switching
-        if (keys['Digit1']) {
-            this.currentWeapon = 0;
-            this.weaponType = this.weaponNames[0];
-        }
-        if (keys['Digit2']) {
-            this.currentWeapon = 1;
-            this.weaponType = this.weaponNames[1];
-        }
-        if (keys['Digit3']) {
-            this.currentWeapon = 2;
-            this.weaponType = this.weaponNames[2];
-        }
-        if (keys['Digit4']) {
-            this.currentWeapon = 3;
-            this.weaponType = this.weaponNames[3];
-        }
         
         // Shooting
         if (keys['Space'] || keys['KeyZ']) {
             this.shoot();
         }
-        
-        // Special weapon
-        if (keys['KeyX']) {
-            this.useSpecialWeapon();
-        }
-        
-        // Update special weapon cooldown
-        if (this.specialWeaponCooldown > 0) {
-            this.specialWeaponCooldown -= deltaTime;
-        }
     }
     
     shoot() {
+        const weapon = WeaponSystem.getWeapon(this.currentWeaponType, this.weaponLevel);
         const now = Date.now();
-        const fireRate = this.fireRate / this.upgrades.fireRate;
+        const fireRate = weapon.fireRate / this.upgrades.fireRate;
         
         if (now - this.lastShot > fireRate) {
-            const weaponType = this.weapons[this.currentWeapon];
-            
-            switch (weaponType) {
-                case 'pulse':
-                    // Standard pulse cannon with upgrades
-                    if (this.weaponLevel === 1) {
-                        game.bullets.push(new Bullet(this.x + this.width/2, this.y, 'player', 'pulse'));
-                    } else if (this.weaponLevel === 2) {
-                        game.bullets.push(new Bullet(this.x + this.width/2 - 10, this.y, 'player', 'pulse'));
-                        game.bullets.push(new Bullet(this.x + this.width/2 + 10, this.y, 'player', 'pulse'));
-                    } else {
-                        game.bullets.push(new Bullet(this.x + this.width/2, this.y, 'player', 'pulse'));
-                        game.bullets.push(new Bullet(this.x + this.width/2 - 15, this.y + 10, 'player', 'pulse'));
-                        game.bullets.push(new Bullet(this.x + this.width/2 + 15, this.y + 10, 'player', 'pulse'));
-                    }
-                    break;
-                case 'laser':
-                    // Single powerful laser
-                    game.bullets.push(new Bullet(this.x + this.width/2, this.y, 'player', 'laser'));
-                    break;
-                case 'spread':
-                    // Wide spread shot
-                    for (let i = -2; i <= 2; i++) {
-                        game.bullets.push(new Bullet(this.x + this.width/2 + i * 8, this.y, 'player', 'spread'));
-                    }
-                    break;
-                case 'homing':
-                    // Homing missiles
-                    const homingBullet = new Bullet(this.x + this.width/2, this.y, 'player', 'homing');
-                    homingBullet.target = this.findNearestEnemy();
-                    game.bullets.push(homingBullet);
-                    break;
-            }
-            game.playSound('shoot');
+            weapon.shoot(this, game);
             this.lastShot = now;
+            game.playSound('shoot');
         }
     }
     
-    findNearestEnemy() {
-        let nearest = null;
-        let minDistance = Infinity;
+    collectWeapon(weaponType) {
+        // Calculate power scaling
+        const stageBonus = game.stage * 0.1;
+        const levelBonus = (game.stage - 1) * 5 + game.level;
+        const totalBonus = stageBonus + (levelBonus * 0.05);
         
-        game.enemies.forEach(enemy => {
-            const dx = enemy.x - this.x;
-            const dy = enemy.y - this.y;
-            const distance = Math.sqrt(dx * dx + dy * dy);
-            if (distance < minDistance) {
-                minDistance = distance;
-                nearest = enemy;
-            }
-        });
+        this.currentWeaponType = weaponType;
+        this.weaponLevel = 1;
+        this.weaponName = WeaponSystem.getWeaponName(weaponType);
         
-        return nearest;
+        // Apply power scaling to base weapon stats
+        const baseWeapon = WeaponSystem.getWeapon(weaponType, 1);
+        baseWeapon.applyPowerScaling(totalBonus);
     }
     
-    useSpecialWeapon() {
-        if (this.specialWeaponCooldown <= 0) {
-            // Launch a barrage of homing missiles
-            for (let i = 0; i < 5; i++) {
-                const missile = new Bullet(this.x + this.width/2 + (i - 2) * 10, this.y, 'player', 'homing');
-                missile.target = this.findNearestEnemy();
-                game.bullets.push(missile);
-            }
-            this.specialWeaponCooldown = this.specialWeaponMaxCooldown;
-            game.playSound('shoot');
+    upgradeWeapon() {
+        if (this.weaponLevel < 5) {
+            this.weaponLevel++;
         }
     }
     
@@ -631,47 +1206,14 @@ class Player {
         if (this.health < 0) this.health = 0;
     }
     
-    upgradeWeapon() {
-        if (this.weaponLevel < 3) {
-            this.weaponLevel++;
-            this.weaponType = ['Pulse Cannon', 'Twin Blaster', 'Spread Shot'][this.weaponLevel - 1];
-        }
-    }
-    
-    upgradeShip(upgradeType) {
-        switch (upgradeType) {
-            case 'speed':
-                this.upgrades.speed = Math.min(2.5, this.upgrades.speed + 0.3);
-                break;
-            case 'health':
-                this.upgrades.health += 0.5;
-                this.maxHealth = Math.floor(100 * this.upgrades.health);
-                this.health = Math.min(this.maxHealth, this.health + 50);
-                break;
-            case 'fireRate':
-                this.upgrades.fireRate = Math.min(3, this.upgrades.fireRate + 0.5);
-                break;
-            case 'damage':
-                this.upgrades.damage = Math.min(2.5, this.upgrades.damage + 0.3);
-                break;
-        }
-    }
-    
-    heal(amount) {
-        this.health = Math.min(this.maxHealth, this.health + amount);
-    }
-    
     render(ctx) {
         ctx.save();
         
-        // Draw engine trails
-        this.drawEngineTrails(ctx);
-        
-        // Draw ship shadow
+        // Draw shadow
         ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
         ctx.fillRect(this.x + 2, this.y + 2, this.width, this.height);
         
-        // Draw ship body with gradient
+        // Draw ship body
         const bodyGradient = ctx.createLinearGradient(this.x + 10, this.y + 10, this.x + 30, this.y + 40);
         bodyGradient.addColorStop(0, '#00ff88');
         bodyGradient.addColorStop(0.5, '#00cc44');
@@ -679,7 +1221,7 @@ class Player {
         ctx.fillStyle = bodyGradient;
         ctx.fillRect(this.x + 10, this.y + 10, 20, 30);
         
-        // Draw ship wings with gradient
+        // Draw wings
         const wingGradient = ctx.createLinearGradient(this.x, this.y + 20, this.x + 40, this.y + 35);
         wingGradient.addColorStop(0, '#00aa22');
         wingGradient.addColorStop(0.5, '#00cc44');
@@ -688,353 +1230,234 @@ class Player {
         ctx.fillRect(this.x, this.y + 20, 10, 15);
         ctx.fillRect(this.x + 30, this.y + 20, 10, 15);
         
-        // Draw ship cockpit with glow
+        // Draw cockpit
         ctx.fillStyle = '#88ff88';
         ctx.fillRect(this.x + 15, this.y + 5, 10, 10);
-        ctx.fillStyle = '#44ff44';
-        ctx.fillRect(this.x + 16, this.y + 6, 8, 8);
         
-        // Draw engine glow with pulsing effect
+        // Draw engine glow
         const pulseIntensity = 0.8 + 0.2 * Math.sin(Date.now() / 100);
         ctx.fillStyle = `rgba(0, 136, 255, ${pulseIntensity})`;
         ctx.fillRect(this.x + 12, this.y + 35, 6, 8);
         ctx.fillRect(this.x + 22, this.y + 35, 6, 8);
         
-        // Upgrade-driven visual changes
-        this.drawUpgradeAccents(ctx);
-
-        // Draw ship outline
-        ctx.strokeStyle = '#00ff00';
-        ctx.lineWidth = 1;
-        ctx.strokeRect(this.x + 10, this.y + 10, 20, 30);
-        ctx.strokeRect(this.x, this.y + 20, 10, 15);
-        ctx.strokeRect(this.x + 30, this.y + 20, 10, 15);
-        
         ctx.restore();
-    }
-    
-    drawEngineTrails(ctx) {
-        // Draw engine particle trails
-        for (let i = 0; i < 3; i++) {
-            const trailX = this.x + 15 + i * 5;
-            const trailY = this.y + 40 + Math.random() * 10;
-            const trailSize = Math.random() * 3 + 1;
-            const trailAlpha = Math.random() * 0.6 + 0.2;
-            
-            ctx.fillStyle = `rgba(0, 136, 255, ${trailAlpha})`;
-            ctx.fillRect(trailX, trailY, trailSize, trailSize);
-        }
-    }
-
-    drawUpgradeAccents(ctx) {
-        // Speed upgrades: longer engines and side fins
-        if (this.upgrades.speed > 1.1) {
-            const extra = Math.min(10, Math.floor((this.upgrades.speed - 1) * 8));
-            ctx.fillStyle = 'rgba(0, 180, 255, 0.7)';
-            ctx.fillRect(this.x + 12, this.y + 35, 6, 8 + extra);
-            ctx.fillRect(this.x + 22, this.y + 35, 6, 8 + extra);
-
-            // Side fins
-            ctx.fillStyle = '#00bb44';
-            ctx.fillRect(this.x - 3, this.y + 22, 3, 12);
-            ctx.fillRect(this.x + this.width, this.y + 22, 3, 12);
-        }
-
-        // Fire rate upgrades: add top vents
-        if (this.upgrades.fireRate > 1.1) {
-            ctx.fillStyle = '#228844';
-            ctx.fillRect(this.x + 13, this.y + 10, 3, 6);
-            ctx.fillRect(this.x + 24, this.y + 10, 3, 6);
-        }
-
-        // Damage upgrades: red nose accents
-        if (this.upgrades.damage > 1.1) {
-            ctx.fillStyle = '#ff3355';
-            ctx.fillRect(this.x + 18, this.y + 3, 4, 6);
-        }
-
-        // Weapon level 3: add nose cone
-        if (this.weaponLevel >= 3) {
-            ctx.fillStyle = '#22ff99';
-            ctx.fillRect(this.x + 17, this.y + 2, 6, 4);
-        }
     }
 }
 
-// Enemy class
+// Energy Shard class
+class EnergyShard {
+    constructor(x, y, fallSpeed) {
+        this.x = x;
+        this.y = y;
+        this.width = 12;
+        this.height = 12;
+        this.fallSpeed = fallSpeed;
+        this.pulsePhase = Math.random() * Math.PI * 2;
+        this.trail = [];
+    }
+    
+    update(deltaTime) {
+        this.y += this.fallSpeed * deltaTime / 1000;
+        this.pulsePhase += deltaTime / 1000 * 4; // Cycle every 0.5 seconds
+        
+        // Add to trail
+        this.trail.push({x: this.x, y: this.y, life: 1.0});
+        if (this.trail.length > 5) {
+            this.trail.shift();
+        }
+        
+        // Update trail
+        this.trail.forEach(t => t.life -= deltaTime / 1000 * 2);
+        this.trail = this.trail.filter(t => t.life > 0);
+    }
+    
+    render(ctx) {
+        ctx.save();
+        
+        // Draw trail
+        this.trail.forEach((t, i) => {
+            ctx.globalAlpha = t.life * 0.3;
+            ctx.fillStyle = '#00DDFF';
+            ctx.fillRect(t.x - 3, t.y - 3, 6, 6);
+        });
+        
+        // Draw shard with pulse
+        const scale = 1.0 + 0.3 * Math.sin(this.pulsePhase);
+        ctx.translate(this.x, this.y);
+        ctx.scale(scale, scale);
+        
+        // Outer glow
+        const glowGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, 8);
+        glowGrad.addColorStop(0, 'rgba(0, 255, 255, 0.8)');
+        glowGrad.addColorStop(1, 'transparent');
+        ctx.fillStyle = glowGrad;
+        ctx.fillRect(-8, -8, 16, 16);
+        
+        // Core
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(-3, -3, 6, 6);
+        ctx.fillStyle = '#00FFFF';
+        ctx.fillRect(-2, -2, 4, 4);
+        
+        ctx.restore();
+    }
+}
+
+// Weapon Drop class
+class WeaponDrop {
+    constructor(x, y, weaponType) {
+        this.x = x;
+        this.y = y;
+        this.width = 30;
+        this.height = 30;
+        this.fallSpeed = 200;
+        this.weaponType = weaponType;
+        this.rotation = 0;
+        this.pulsePhase = 0;
+    }
+    
+    update(deltaTime) {
+        this.y += this.fallSpeed * deltaTime / 1000;
+        this.rotation += deltaTime / 1000 * 2;
+        this.pulsePhase += deltaTime / 1000 * 3;
+    }
+    
+    render(ctx) {
+        ctx.save();
+        ctx.translate(this.x + this.width/2, this.y + this.height/2);
+        ctx.rotate(this.rotation);
+        
+        const scale = 1.0 + 0.2 * Math.sin(this.pulsePhase);
+        ctx.scale(scale, scale);
+        
+        // Glow
+        ctx.shadowColor = '#ffff00';
+        ctx.shadowBlur = 15;
+        
+        // Weapon icon (simplified)
+        ctx.fillStyle = '#ffff00';
+        ctx.fillRect(-10, -10, 20, 20);
+        ctx.fillStyle = '#ffaa00';
+        ctx.fillRect(-6, -6, 12, 12);
+        
+        // Weapon name
+        ctx.restore();
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '12px Courier New';
+        ctx.textAlign = 'center';
+        ctx.fillText(WeaponSystem.getWeaponName(this.weaponType), this.x + this.width/2, this.y - 5);
+    }
+}
+
+// Enemy class with behavior progression
 class Enemy {
-    constructor(x, y, type = 'basic', player = null) {
+    constructor(x, y, type, player, levelConfig) {
         this.x = x;
         this.y = y;
         this.type = type;
         this.player = player;
-        this.speed = 100;
-        this.health = 30;
-        this.maxHealth = 30;
-        this.points = 100;
-        this.fireRate = 1000;
-        this.lastShot = 0;
-        this.movePattern = 0;
+        this.levelConfig = levelConfig;
+        this.carriesShard = false;
         this.moveTimer = 0;
         this.angle = 0;
         this.radius = 0;
         this.direction = 1;
-        this.aggressionLevel = 1;
         
-        // Configure based on type
-        switch (type) {
-            // Weak enemies
-            case 'scout':
-                this.speed = 120;
-                this.health = 10;
-                this.maxHealth = 10;
-                this.points = 50;
-                this.width = 20;
-                this.height = 20;
-                this.fireRate = 1500;
-                this.aggressionLevel = 1;
-                this.tier = 'weak';
-                break;
-            case 'drone':
-                this.speed = 100;
-                this.health = 15;
-                this.maxHealth = 15;
-                this.points = 75;
-                this.width = 18;
-                this.height = 18;
-                this.fireRate = 1200;
-                this.aggressionLevel = 1;
-                this.tier = 'weak';
-                break;
-            case 'fighter':
-                this.speed = 150;
-                this.health = 20;
-                this.maxHealth = 20;
-                this.points = 100;
-                this.width = 25;
-                this.height = 25;
-                this.fireRate = 1000;
-                this.aggressionLevel = 2;
-                this.tier = 'weak';
-                break;
-            // Medium enemies
-            case 'fast':
-                this.speed = 250;
-                this.health = 15;
-                this.maxHealth = 15;
-                this.points = 150;
-                this.width = 25;
-                this.height = 25;
-                this.fireRate = 800;
-                this.aggressionLevel = 2;
-                this.tier = 'medium';
-                break;
-            case 'zigzag':
-                this.speed = 150;
-                this.health = 25;
-                this.maxHealth = 25;
-                this.points = 180;
-                this.width = 30;
-                this.height = 30;
-                this.fireRate = 1000;
-                this.aggressionLevel = 1;
-                this.tier = 'medium';
-                break;
-            case 'sidewinder':
-                this.speed = 200;
-                this.health = 20;
-                this.maxHealth = 20;
-                this.points = 160;
-                this.width = 28;
-                this.height = 28;
-                this.fireRate = 700;
-                this.aggressionLevel = 2;
-                this.tier = 'medium';
-                break;
-            // Strong enemies
-            case 'heavy':
-                this.speed = 60;
-                this.health = 120;
-                this.maxHealth = 120;
-                this.points = 400;
-                this.fireRate = 600;
-                this.width = 50;
-                this.height = 50;
-                this.aggressionLevel = 1;
-                this.tier = 'strong';
-                break;
-            case 'hunter':
-                this.speed = 180;
-                this.health = 40;
-                this.maxHealth = 40;
-                this.points = 250;
-                this.fireRate = 1200;
-                this.width = 35;
-                this.height = 35;
-                this.aggressionLevel = 3;
-                this.tier = 'strong';
-                break;
-            case 'bomber':
-                this.speed = 80;
-                this.health = 80;
-                this.maxHealth = 80;
-                this.points = 350;
-                this.fireRate = 2000;
-                this.width = 45;
-                this.height = 45;
-                this.aggressionLevel = 2;
-                this.tier = 'strong';
-                break;
-            case 'turret':
-                // Stationary relative to background; movement handled in update()
-                this.speed = 0;
-                this.health = 70;
-                this.maxHealth = 70;
-                this.points = 300;
-                this.fireRate = 1100;
-                this.width = 34;
-                this.height = 34;
-                this.aggressionLevel = 3;
-                this.tier = 'strong';
-                break;
-            case 'spiral':
-                this.speed = 120;
-                this.health = 35;
-                this.maxHealth = 35;
-                this.points = 220;
-                this.fireRate = 900;
-                this.width = 32;
-                this.height = 32;
-                this.radius = 50;
-                this.aggressionLevel = 2;
-                this.tier = 'strong';
-                break;
-            // Elite enemies
-            case 'elite_hunter':
-                this.speed = 220;
-                this.health = 80;
-                this.maxHealth = 80;
-                this.points = 500;
-                this.fireRate = 800;
-                this.width = 40;
-                this.height = 40;
-                this.aggressionLevel = 4;
-                this.tier = 'elite';
-                break;
-            case 'elite_bomber':
-                this.speed = 100;
-                this.health = 150;
-                this.maxHealth = 150;
-                this.points = 600;
-                this.fireRate = 1500;
-                this.width = 55;
-                this.height = 55;
-                this.aggressionLevel = 3;
-                this.tier = 'elite';
-                break;
-            case 'elite_spiral':
-                this.speed = 150;
-                this.health = 60;
-                this.maxHealth = 60;
-                this.points = 450;
-                this.fireRate = 600;
-                this.width = 38;
-                this.height = 38;
-                this.radius = 60;
-                this.aggressionLevel = 3;
-                this.tier = 'elite';
-                break;
-            default: // basic
-                this.width = 30;
-                this.height = 30;
-                this.tier = 'medium';
+        // Configure based on type (from plan specifications)
+        this.setupEnemyType(type);
+        
+        // Apply level speed multiplier
+        this.speed = this.baseSpeed * (this.levelConfig.speed / 100);
+        
+        // Level 1: 0.8x speed multiplier
+        if (game.level === 1) {
+            this.speed *= 0.8;
         }
+    }
+    
+    setupEnemyType(type) {
+        const configs = {
+            'basic': { health: 30, baseSpeed: 100, width: 30, height: 30, points: 100, fireRate: 2000, canShoot: false },
+            'scout': { health: 10, baseSpeed: 120, width: 20, height: 20, points: 50, fireRate: 1500, canShoot: false },
+            'zigzag': { health: 25, baseSpeed: 150, width: 30, height: 30, points: 180, fireRate: 1000, canShoot: true },
+            'fast': { health: 15, baseSpeed: 250, width: 25, height: 25, points: 150, fireRate: 800, canShoot: true },
+            'fighter': { health: 20, baseSpeed: 150, width: 25, height: 25, points: 100, fireRate: 1000, canShoot: true },
+            'sidewinder': { health: 20, baseSpeed: 200, width: 28, height: 28, points: 160, fireRate: 700, canShoot: true },
+            'hunter': { health: 40, baseSpeed: 180, width: 35, height: 35, points: 250, fireRate: 1200, canShoot: true },
+            'bomber': { health: 80, baseSpeed: 80, width: 45, height: 45, points: 350, fireRate: 2000, canShoot: true },
+            'heavy': { health: 120, baseSpeed: 60, width: 50, height: 50, points: 400, fireRate: 600, canShoot: true },
+            'spiral': { health: 35, baseSpeed: 120, width: 32, height: 32, points: 220, fireRate: 900, canShoot: true, radius: 50 },
+            'turret': { health: 70, baseSpeed: 0, width: 34, height: 34, points: 300, fireRate: 1100, canShoot: true },
+            'elite_hunter': { health: 80, baseSpeed: 220, width: 40, height: 40, points: 500, fireRate: 800, canShoot: true },
+            'elite_bomber': { health: 150, baseSpeed: 100, width: 55, height: 55, points: 600, fireRate: 1500, canShoot: true },
+            'elite_spiral': { health: 60, baseSpeed: 150, width: 38, height: 38, points: 450, fireRate: 600, canShoot: true, radius: 60 }
+        };
+        
+        const config = configs[type] || configs['basic'];
+        this.health = config.health;
+        this.maxHealth = config.health;
+        this.baseSpeed = config.baseSpeed;
+        this.width = config.width;
+        this.height = config.height;
+        this.points = config.points;
+        this.fireRate = config.fireRate;
+        this.canShoot = config.canShoot;
+        this.radius = config.radius || 0;
+        this.lastShot = 0;
     }
     
     update(deltaTime) {
         this.moveTimer += deltaTime;
         
-        // Movement patterns
-        switch (this.type) {
-            // Weak enemies
-            case 'scout':
-                this.y += this.speed * deltaTime / 1000;
-                this.x += Math.sin(this.moveTimer / 300) * 2;
-                break;
-            case 'drone':
-                this.y += this.speed * deltaTime / 1000;
-                this.x += Math.cos(this.moveTimer / 400) * 1.5;
-                break;
-            case 'fighter':
-                this.y += this.speed * deltaTime / 1000;
-                this.x += Math.sin(this.moveTimer / 250) * 2.5;
-                break;
-            // Medium enemies
-            case 'fast':
-                this.y += this.speed * deltaTime / 1000;
-                this.x += Math.sin(this.moveTimer / 200) * 3;
-                break;
-            case 'zigzag':
-                this.y += this.speed * deltaTime / 1000;
-                this.x += Math.sin(this.moveTimer / 300) * 4;
-                break;
-            case 'sidewinder':
-                this.y += this.speed * deltaTime / 1000 * 0.3;
-                this.x += Math.sin(this.moveTimer / 150) * 5;
-                break;
-            // Strong enemies
-            case 'heavy':
-                this.y += this.speed * deltaTime / 1000;
-                break;
-            case 'hunter':
-            case 'elite_hunter':
-                // Hunt the player - move towards player position
-                if (this.player) {
-                    const dx = this.player.x - this.x;
-                    const dy = this.player.y - this.y;
-                    const distance = Math.sqrt(dx * dx + dy * dy);
-                    if (distance > 0) {
-                        const huntSpeed = this.type === 'elite_hunter' ? 0.7 : 0.5;
-                        this.x += (dx / distance) * this.speed * deltaTime / 1000 * huntSpeed;
-                        this.y += (dy / distance) * this.speed * deltaTime / 1000 * huntSpeed;
-                    }
-                } else {
-                    this.y += this.speed * deltaTime / 1000;
+        // Movement patterns based on type and level
+        if (this.type === 'zigzag' && game.level >= 2) {
+            // Zigzag pattern
+            this.y += this.speed * deltaTime / 1000;
+            const amplitude = 30 + Math.random() * 20;
+            const frequency = 1 + Math.random();
+            this.x += Math.sin(this.moveTimer / (frequency * 1000)) * amplitude * deltaTime / 1000;
+        } else if (this.type === 'sidewinder') {
+            this.y += this.speed * deltaTime / 1000 * 0.3;
+            this.x += Math.sin(this.moveTimer / 150) * 5;
+        } else if (this.type === 'hunter' || this.type === 'elite_hunter') {
+            // Track player
+            if (this.player) {
+                const dx = this.player.x - this.x;
+                const dy = this.player.y - this.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                if (distance > 0) {
+                    const huntSpeed = this.type === 'elite_hunter' ? 0.7 : 0.5;
+                    this.x += (dx / distance) * this.speed * deltaTime / 1000 * huntSpeed;
+                    this.y += (dy / distance) * this.speed * deltaTime / 1000 * huntSpeed;
                 }
-                break;
-            case 'bomber':
-            case 'elite_bomber':
+            } else {
                 this.y += this.speed * deltaTime / 1000;
-                this.x += Math.sin(this.moveTimer / 400) * 2;
-                break;
-            case 'spiral':
-            case 'elite_spiral':
-                // Spiral movement pattern
-                this.angle += deltaTime / 100;
-                this.radius += deltaTime / 500;
-                const centerX = game.width / 2;
-                this.x = centerX + Math.cos(this.angle) * this.radius;
-                this.y += this.speed * deltaTime / 1000 * 0.5;
-                break;
-            case 'turret':
-                // Move with background scrolling so it appears attached to terrain
-                {
-                    const speedBoost = this.player ? (this.player.upgrades?.speed || 1) : 1;
-                    this.y += (game.scrollSpeed * 0.6 * speedBoost) * deltaTime / 1000;
-                }
-                break;
-            default: // basic
-                this.y += this.speed * deltaTime / 1000;
-                this.x += Math.sin(this.moveTimer / 500) * 1;
+            }
+        } else if (this.type === 'spiral' || this.type === 'elite_spiral') {
+            this.angle += deltaTime / 100;
+            this.radius += deltaTime / 500;
+            const centerX = game.width / 2;
+            this.x = centerX + Math.cos(this.angle) * this.radius;
+            this.y += this.speed * deltaTime / 1000 * 0.5;
+        } else if (this.type === 'turret') {
+            // Moves with background
+            this.y += 50 * deltaTime / 1000;
+        } else {
+            // Basic movement (straight down)
+            this.y += this.speed * deltaTime / 1000;
+            // Slight horizontal drift
+            this.x += Math.sin(this.moveTimer / 500) * 1;
         }
         
-        // Keep in bounds horizontally
+        // Keep in bounds
         this.x = Math.max(0, Math.min(this.x, game.width - this.width));
         
-        // Shooting based on aggression level and type
-        const shootChance = this.aggressionLevel * 0.0005;
-        if (Math.random() < shootChance && this.y > 50) {
-            this.shoot();
+        // Shooting (Level 3+)
+        if (game.level >= 3 && this.canShoot) {
+            const shootChance = (this.levelConfig.shootPercent / 100) * 0.01;
+            if (Math.random() < shootChance && this.y > 50) {
+                this.shoot();
+            }
         }
     }
     
@@ -1042,123 +1465,40 @@ class Enemy {
         const now = Date.now();
         if (now - this.lastShot > this.fireRate) {
             switch (this.type) {
-                // Weak enemies
-                case 'scout':
-                case 'drone':
-                case 'fighter':
-                    game.bullets.push(new Bullet(this.x + this.width/2, this.y + this.height, 'enemy', 'basic'));
-                    break;
-                // Medium enemies
-                case 'fast':
-                    game.bullets.push(new Bullet(this.x + this.width/2, this.y + this.height, 'enemy', 'fast'));
-                    break;
-                case 'zigzag':
-                    // Double shot
-                    game.bullets.push(new Bullet(this.x + this.width/2 - 8, this.y + this.height, 'enemy', 'basic'));
-                    game.bullets.push(new Bullet(this.x + this.width/2 + 8, this.y + this.height, 'enemy', 'basic'));
-                    break;
-                case 'sidewinder':
-                    // Side shots
-                    game.bullets.push(new Bullet(this.x, this.y + this.height/2, 'enemy', 'basic'));
-                    game.bullets.push(new Bullet(this.x + this.width, this.y + this.height/2, 'enemy', 'basic'));
-                    break;
-                // Strong enemies
                 case 'bomber':
-                    // Drop multiple bombs in a spread
-                    for (let i = -1; i <= 1; i++) {
-                        game.bullets.push(new Bullet(
-                            this.x + this.width/2 + i * 15, 
-                            this.y + this.height, 
-                            'enemy', 
-                            'bomb'
-                        ));
+                case 'elite_bomber':
+                    const bombCount = this.type === 'elite_bomber' ? 5 : 3;
+                    for (let i = -(bombCount-1)/2; i <= (bombCount-1)/2; i++) {
+                        game.bullets.push(new Bullet(this.x + this.width/2 + i * 15, this.y + this.height, 'enemy', 'bomb'));
                     }
                     break;
                 case 'heavy':
-                    // Triple shot
                     for (let i = -1; i <= 1; i++) {
-                        game.bullets.push(new Bullet(
-                            this.x + this.width/2 + i * 20, 
-                            this.y + this.height, 
-                            'enemy', 
-                            'heavy'
-                        ));
+                        game.bullets.push(new Bullet(this.x + this.width/2 + i * 20, this.y + this.height, 'enemy', 'heavy'));
                     }
                     break;
-            case 'hunter':
-                    // Homing shot
-                    const homingBullet = new Bullet(
-                        this.x + this.width/2, 
-                        this.y + this.height, 
-                        'enemy', 
-                        'homing'
-                    );
-                    homingBullet.target = this.player;
-                    game.bullets.push(homingBullet);
-                    break;
-            case 'turret':
-                {
-                    const tBullet = new Bullet(
-                        this.x + this.width/2,
-                        this.y + this.height/2,
-                        'enemy',
-                        'homing'
-                    );
-                    tBullet.target = this.player;
-                    game.bullets.push(tBullet);
-                }
-                break;
-                case 'spiral':
-                    // Spiral shot pattern
-                    for (let i = 0; i < 3; i++) {
-                        game.bullets.push(new Bullet(
-                            this.x + this.width/2, 
-                            this.y + this.height, 
-                            'enemy', 
-                            'spiral',
-                            i * Math.PI * 2 / 3
-                        ));
-                    }
-                    break;
-                // Elite enemies
+                case 'hunter':
                 case 'elite_hunter':
-                    // Double homing shots
-                    for (let i = 0; i < 2; i++) {
-                        const eliteHomingBullet = new Bullet(
-                            this.x + this.width/2 + (i - 0.5) * 10, 
-                            this.y + this.height, 
-                            'enemy', 
-                            'homing'
-                        );
-                        eliteHomingBullet.target = this.player;
-                        game.bullets.push(eliteHomingBullet);
+                    const homingCount = this.type === 'elite_hunter' ? 2 : 1;
+                    for (let i = 0; i < homingCount; i++) {
+                        const bullet = new Bullet(this.x + this.width/2 + (i - 0.5) * 10, this.y + this.height, 'enemy', 'homing');
+                        bullet.target = this.player;
+                        game.bullets.push(bullet);
                     }
                     break;
-                case 'elite_bomber':
-                    // Massive bomb spread
-                    for (let i = -2; i <= 2; i++) {
-                        game.bullets.push(new Bullet(
-                            this.x + this.width/2 + i * 12, 
-                            this.y + this.height, 
-                            'enemy', 
-                            'bomb'
-                        ));
-                    }
-                    break;
+                case 'spiral':
                 case 'elite_spiral':
-                    // Enhanced spiral pattern
-                    for (let i = 0; i < 5; i++) {
-                        game.bullets.push(new Bullet(
-                            this.x + this.width/2, 
-                            this.y + this.height, 
-                            'enemy', 
-                            'spiral',
-                            i * Math.PI * 2 / 5
-                        ));
+                    const spiralCount = this.type === 'elite_spiral' ? 5 : 3;
+                    for (let i = 0; i < spiralCount; i++) {
+                        game.bullets.push(new Bullet(this.x + this.width/2, this.y + this.height, 'enemy', 'spiral', i * Math.PI * 2 / spiralCount));
                     }
+                    break;
+                case 'zigzag':
+                    game.bullets.push(new Bullet(this.x + this.width/2 - 8, this.y + this.height, 'enemy', 'basic'));
+                    game.bullets.push(new Bullet(this.x + this.width/2 + 8, this.y + this.height, 'enemy', 'basic'));
                     break;
                 default:
-                    game.bullets.push(new Bullet(this.x + this.width/2, this.y + this.height, 'enemy'));
+                    game.bullets.push(new Bullet(this.x + this.width/2, this.y + this.height, 'enemy', 'basic'));
             }
             this.lastShot = now;
         }
@@ -1172,347 +1512,227 @@ class Enemy {
     render(ctx) {
         ctx.save();
         
-        // Draw shadow based on tier
-        const shadowAlpha = this.tier === 'elite' ? 0.4 : this.tier === 'strong' ? 0.3 : 0.2;
-        ctx.fillStyle = `rgba(0, 0, 0, ${shadowAlpha})`;
+        // Draw shadow
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
         ctx.fillRect(this.x + 2, this.y + 2, this.width, this.height);
         
-        // Draw based on type and tier
-        switch (this.type) {
-            // Weak enemies
-            case 'scout':
-                this.drawScout(ctx);
-                break;
-            case 'drone':
-                this.drawDrone(ctx);
-                break;
-            case 'fighter':
-                this.drawFighter(ctx);
-                break;
-            // Medium enemies
-            case 'fast':
-                this.drawFast(ctx);
-                break;
-            case 'zigzag':
-                this.drawZigzag(ctx);
-                break;
-            case 'sidewinder':
-                this.drawSidewinder(ctx);
-                break;
-            // Strong enemies
-            case 'heavy':
-                this.drawHeavy(ctx);
-                break;
-            case 'hunter':
-                this.drawHunter(ctx);
-                break;
-            case 'turret':
-                this.drawTurret(ctx);
-                break;
-            case 'bomber':
-                this.drawBomber(ctx);
-                break;
-            case 'spiral':
-                this.drawSpiral(ctx);
-                break;
-            // Elite enemies
-            case 'elite_hunter':
-                this.drawEliteHunter(ctx);
-                break;
-            case 'elite_bomber':
-                this.drawEliteBomber(ctx);
-                break;
-            case 'elite_spiral':
-                this.drawEliteSpiral(ctx);
-                break;
-            default: // basic
-                this.drawBasic(ctx);
+        // Draw enemy based on type
+        const colors = {
+            'basic': '#ff8800',
+            'scout': '#ff6666',
+            'zigzag': '#00ff88',
+            'fast': '#ff4444',
+            'fighter': '#66ff66',
+            'sidewinder': '#8800ff',
+            'hunter': '#ff0080',
+            'bomber': '#8B4513',
+            'heavy': '#8844ff',
+            'spiral': '#ffaa00',
+            'turret': '#444a55',
+            'elite_hunter': '#ff44aa',
+            'elite_bomber': '#A0522D',
+            'elite_spiral': '#ffcc44'
+        };
+        
+        ctx.fillStyle = colors[this.type] || '#ff8800';
+        ctx.fillRect(this.x, this.y, this.width, this.height);
+        
+        // Draw shard if carrying
+        if (this.carriesShard) {
+            ctx.fillStyle = '#00FFFF';
+            ctx.fillRect(this.x + this.width/2 - 6, this.y - 10, 12, 12);
         }
         
-        // Draw tier indicator
-        this.drawTierIndicator(ctx);
-        
-        // Health bar for damaged enemies
+        // Health bar if damaged
         if (this.health < this.maxHealth) {
-            this.drawHealthBar(ctx);
+            const healthPercent = this.health / this.maxHealth;
+            ctx.fillStyle = '#ff0000';
+            ctx.fillRect(this.x, this.y - 8, this.width, 4);
+            ctx.fillStyle = '#00ff00';
+            ctx.fillRect(this.x, this.y - 8, this.width * healthPercent, 4);
         }
         
         ctx.restore();
     }
-    
-    drawTierIndicator(ctx) {
-        if (this.tier === 'elite') {
-            // Elite enemies get a golden glow
-            ctx.strokeStyle = '#ffd700';
-            ctx.lineWidth = 2;
-            ctx.strokeRect(this.x - 2, this.y - 2, this.width + 4, this.height + 4);
-        }
+}
+
+// Boss class
+class Boss {
+    constructor(x, y, bossType, player) {
+        this.x = x;
+        this.y = y;
+        this.bossType = bossType;
+        this.player = player;
+        this.moveTimer = 0;
+        this.attackTimer = 0;
+        this.phase = 1;
+        this.direction = 1;
+        this.teleportTimer = 0;
+        
+        this.setupBoss(bossType);
     }
     
-    drawHealthBar(ctx) {
+    setupBoss(bossType) {
+        const configs = {
+            'Stage1_Boss': { health: 500, width: 80, height: 80, points: 1000, shardDrops: 3, speed: 50, attackRate: 2000, attackType: 'spread3' },
+            'Stage2_Boss': { health: 750, width: 90, height: 90, points: 1500, shardDrops: 4, speed: 80, attackRate: 1500, attackType: 'spread5' },
+            'Stage3_Boss': { health: 1000, width: 100, height: 100, points: 2000, shardDrops: 5, speed: 60, attackRate: 1200, attackType: 'spread7' },
+            'Stage4_Boss': { health: 1500, width: 110, height: 110, points: 3000, shardDrops: 6, speed: 100, attackRate: 1000, attackType: 'spread9' },
+            'Stage5_FinalBoss': { health: 2500, width: 120, height: 120, points: 5000, shardDrops: 10, speed: 70, attackRate: 800, attackType: 'spread12' },
+            'Asteroid_Crusher': { health: 2000, width: 130, height: 130, points: 4000, shardDrops: 8, speed: 40, attackRate: 2000, attackType: 'asteroid' },
+            'Void_Reaper': { health: 3000, width: 140, height: 140, points: 6000, shardDrops: 10, speed: 120, attackRate: 1500, attackType: 'void' }
+        };
+        
+        const config = configs[bossType] || configs['Stage1_Boss'];
+        this.health = config.health;
+        this.maxHealth = config.health;
+        this.width = config.width;
+        this.height = config.height;
+        this.points = config.points;
+        this.shardDrops = config.shardDrops;
+        this.speed = config.speed;
+        this.attackRate = config.attackRate;
+        this.attackType = config.attackType;
+    }
+    
+    update(deltaTime) {
+        this.moveTimer += deltaTime;
+        this.attackTimer += deltaTime;
+        
+        // Movement patterns
+        if (this.bossType === 'Stage1_Boss') {
+            // Slow horizontal
+            this.x += this.speed * this.direction * deltaTime / 1000;
+            if (this.x < 50 || this.x > game.width - this.width - 50) {
+                this.direction *= -1;
+            }
+        } else if (this.bossType === 'Stage2_Boss') {
+            // Zigzag
+            this.x += this.speed * this.direction * deltaTime / 1000;
+            this.y += Math.sin(this.moveTimer / 500) * 20 * deltaTime / 1000;
+            if (this.x < 50 || this.x > game.width - this.width - 50) {
+                this.direction *= -1;
+            }
+        } else if (this.bossType === 'Stage4_Boss' || this.bossType === 'Void_Reaper') {
+            // Teleportation
+            this.teleportTimer += deltaTime;
+            if (this.teleportTimer > 4000) {
+                this.x = 50 + Math.random() * (game.width - this.width - 100);
+                this.y = 50 + Math.random() * 200;
+                this.teleportTimer = 0;
+            }
+        } else if (this.bossType === 'Stage5_FinalBoss') {
+            // Complex pattern
+            this.x += Math.cos(this.moveTimer / 1000) * this.speed * deltaTime / 1000;
+            this.y += Math.sin(this.moveTimer / 800) * 30 * deltaTime / 1000;
+            this.x = Math.max(50, Math.min(game.width - this.width - 50, this.x));
+            this.y = Math.max(50, Math.min(300, this.y));
+        }
+        
+        // Attacks
+        if (this.attackTimer > this.attackRate) {
+            this.attack();
+            this.attackTimer = 0;
+        }
+        
+        // Phase changes
         const healthPercent = this.health / this.maxHealth;
-        const barHeight = 4;
-        const barY = this.y - 8;
+        if (healthPercent < 0.75 && this.phase === 1) {
+            this.phase = 2;
+            this.attackRate *= 0.8;
+        } else if (healthPercent < 0.5 && this.phase === 2) {
+            this.phase = 3;
+            this.attackRate *= 0.8;
+        } else if (healthPercent < 0.25 && this.phase === 3) {
+            this.phase = 4;
+            this.attackRate *= 0.8;
+        }
+    }
+    
+    attack() {
+        switch (this.attackType) {
+            case 'spread3':
+                for (let i = -1; i <= 1; i++) {
+                    game.bullets.push(new Bullet(this.x + this.width/2 + i * 20, this.y + this.height, 'enemy', 'heavy'));
+                }
+                break;
+            case 'spread5':
+                for (let i = -2; i <= 2; i++) {
+                    game.bullets.push(new Bullet(this.x + this.width/2 + i * 15, this.y + this.height, 'enemy', 'heavy'));
+                }
+                if (Math.random() < 0.3) {
+                    const bullet = new Bullet(this.x + this.width/2, this.y + this.height, 'enemy', 'homing');
+                    bullet.target = this.player;
+                    game.bullets.push(bullet);
+                }
+                break;
+            case 'spread7':
+                for (let i = -3; i <= 3; i++) {
+                    game.bullets.push(new Bullet(this.x + this.width/2 + i * 12, this.y + this.height, 'enemy', 'heavy'));
+                }
+                if (Math.random() < 0.4) {
+                    const bullet = new Bullet(this.x + this.width/2, this.y + this.height, 'enemy', 'homing');
+                    bullet.target = this.player;
+                    game.bullets.push(bullet);
+                }
+                break;
+            case 'spread9':
+                for (let i = -4; i <= 4; i++) {
+                    game.bullets.push(new Bullet(this.x + this.width/2 + i * 10, this.y + this.height, 'enemy', 'heavy'));
+                }
+                if (Math.random() < 0.5) {
+                    const bullet = new Bullet(this.x + this.width/2, this.y + this.height, 'enemy', 'homing');
+                    bullet.target = this.player;
+                    game.bullets.push(bullet);
+                }
+                break;
+            case 'spread12':
+                for (let i = -5; i <= 5; i++) {
+                    game.bullets.push(new Bullet(this.x + this.width/2 + i * 8, this.y + this.height, 'enemy', 'heavy'));
+                }
+                if (Math.random() < 0.6) {
+                    const bullet = new Bullet(this.x + this.width/2, this.y + this.height, 'enemy', 'homing');
+                    bullet.target = this.player;
+                    game.bullets.push(bullet);
+                }
+                break;
+        }
+    }
+    
+    takeDamage(damage) {
+        this.health -= damage;
+        if (this.health < 0) this.health = 0;
+    }
+    
+    render(ctx) {
+        ctx.save();
         
-        // Background
+        // Draw boss
+        const bossColors = {
+            'Stage1_Boss': '#ff0080',
+            'Stage2_Boss': '#8B7355',
+            'Stage3_Boss': '#ff88ff',
+            'Stage4_Boss': '#0000ff',
+            'Stage5_FinalBoss': '#ff0000',
+            'Asteroid_Crusher': '#654321',
+            'Void_Reaper': '#4400aa'
+        };
+        
+        ctx.fillStyle = bossColors[this.bossType] || '#ff0080';
+        ctx.fillRect(this.x, this.y, this.width, this.height);
+        
+        // Glowing core
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(this.x + this.width/2 - 10, this.y + this.height/2 - 10, 20, 20);
+        
+        // Health bar
+        const healthPercent = this.health / this.maxHealth;
         ctx.fillStyle = '#ff0000';
-        ctx.fillRect(this.x, barY, this.width, barHeight);
-        
-        // Health
+        ctx.fillRect(this.x, this.y - 15, this.width, 6);
         ctx.fillStyle = '#00ff00';
-        ctx.fillRect(this.x, barY, this.width * healthPercent, barHeight);
+        ctx.fillRect(this.x, this.y - 15, this.width * healthPercent, 6);
         
-        // Border
-        ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 1;
-        ctx.strokeRect(this.x, barY, this.width, barHeight);
-    }
-    
-    // Enemy drawing methods
-    drawScout(ctx) {
-        const gradient = ctx.createLinearGradient(this.x, this.y, this.x + this.width, this.y + this.height);
-        gradient.addColorStop(0, '#ffaaaa');
-        gradient.addColorStop(1, '#ff6666');
-        ctx.fillStyle = gradient;
-        ctx.fillRect(this.x + 2, this.y + 2, 16, 16);
-        
-        ctx.fillStyle = '#ff8888';
-        ctx.fillRect(this.x, this.y + 6, 20, 8);
-    }
-    
-    drawDrone(ctx) {
-        const gradient = ctx.createRadialGradient(this.x + 9, this.y + 9, 0, this.x + 9, this.y + 9, 9);
-        gradient.addColorStop(0, '#aaaaff');
-        gradient.addColorStop(1, '#6666ff');
-        ctx.fillStyle = gradient;
-        ctx.fillRect(this.x + 1, this.y + 1, 16, 16);
-        
-        ctx.fillStyle = '#8888ff';
-        ctx.fillRect(this.x + 4, this.y + 4, 10, 10);
-    }
-    
-    drawFighter(ctx) {
-        const gradient = ctx.createLinearGradient(this.x, this.y, this.x + this.width, this.y + this.height);
-        gradient.addColorStop(0, '#aaffaa');
-        gradient.addColorStop(1, '#66ff66');
-        ctx.fillStyle = gradient;
-        ctx.fillRect(this.x + 2, this.y + 2, 21, 21);
-        
-        ctx.fillStyle = '#88ff88';
-        ctx.fillRect(this.x, this.y + 8, 25, 10);
-    }
-    
-    drawFast(ctx) {
-        const gradient = ctx.createLinearGradient(this.x, this.y, this.x + this.width, this.y + this.height);
-        gradient.addColorStop(0, '#ff4444');
-        gradient.addColorStop(1, '#cc0000');
-        ctx.fillStyle = gradient;
-        ctx.fillRect(this.x + 5, this.y, 15, 25);
-        
-        ctx.fillStyle = '#ff8888';
-        ctx.fillRect(this.x, this.y + 10, 25, 10);
-        
-        // Engine glow
-        ctx.fillStyle = '#ff0000';
-        ctx.fillRect(this.x + 8, this.y + 20, 4, 8);
-        ctx.fillRect(this.x + 13, this.y + 20, 4, 8);
-    }
-    
-    drawZigzag(ctx) {
-        const gradient = ctx.createLinearGradient(this.x, this.y, this.x + this.width, this.y + this.height);
-        gradient.addColorStop(0, '#00ff88');
-        gradient.addColorStop(1, '#00aa44');
-        ctx.fillStyle = gradient;
-        ctx.fillRect(this.x + 5, this.y, 20, 30);
-        
-        ctx.fillStyle = '#44ffaa';
-        ctx.fillRect(this.x, this.y + 12, 30, 8);
-        
-        ctx.fillStyle = '#00aa55';
-        ctx.fillRect(this.x + 8, this.y + 5, 14, 6);
-    }
-    
-    drawSidewinder(ctx) {
-        const gradient = ctx.createLinearGradient(this.x, this.y, this.x + this.width, this.y + this.height);
-        gradient.addColorStop(0, '#8800ff');
-        gradient.addColorStop(1, '#4400aa');
-        ctx.fillStyle = gradient;
-        ctx.fillRect(this.x + 6, this.y, 16, 28);
-        
-        ctx.fillStyle = '#aa44ff';
-        ctx.fillRect(this.x + 1, this.y + 10, 26, 10);
-        
-        ctx.fillStyle = '#6600cc';
-        ctx.fillRect(this.x + 9, this.y + 4, 10, 8);
-    }
-    
-    drawHeavy(ctx) {
-        const gradient = ctx.createLinearGradient(this.x, this.y, this.x + this.width, this.y + this.height);
-        gradient.addColorStop(0, '#8844ff');
-        gradient.addColorStop(1, '#4422aa');
-        ctx.fillStyle = gradient;
-        ctx.fillRect(this.x + 10, this.y, 30, 40);
-        
-        ctx.fillStyle = '#aa88ff';
-        ctx.fillRect(this.x, this.y + 15, 50, 20);
-        
-        ctx.fillStyle = '#4422aa';
-        ctx.fillRect(this.x + 20, this.y + 5, 10, 10);
-        
-        // Armor plating
-        ctx.fillStyle = '#221155';
-        ctx.fillRect(this.x + 5, this.y + 10, 40, 5);
-        ctx.fillRect(this.x + 5, this.y + 25, 40, 5);
-    }
-    
-    drawHunter(ctx) {
-        const gradient = ctx.createLinearGradient(this.x, this.y, this.x + this.width, this.y + this.height);
-        gradient.addColorStop(0, '#ff0080');
-        gradient.addColorStop(1, '#aa0044');
-        ctx.fillStyle = gradient;
-        ctx.fillRect(this.x + 7, this.y, 21, 35);
-        
-        ctx.fillStyle = '#ff44aa';
-        ctx.fillRect(this.x + 2, this.y + 12, 31, 12);
-        
-        ctx.fillStyle = '#aa0044';
-        ctx.fillRect(this.x + 12, this.y + 5, 11, 8);
-        
-        // Targeting system
-        ctx.fillStyle = '#ff0000';
-        ctx.fillRect(this.x + 15, this.y + 2, 5, 3);
-    }
-    
-    drawBomber(ctx) {
-        const gradient = ctx.createLinearGradient(this.x, this.y, this.x + this.width, this.y + this.height);
-        gradient.addColorStop(0, '#8B4513');
-        gradient.addColorStop(1, '#654321');
-        ctx.fillStyle = gradient;
-        ctx.fillRect(this.x + 7, this.y, 31, 45);
-        
-        ctx.fillStyle = '#A0522D';
-        ctx.fillRect(this.x + 2, this.y + 20, 41, 15);
-        
-        ctx.fillStyle = '#654321';
-        ctx.fillRect(this.x + 17, this.y + 8, 11, 12);
-        
-        // Bomb bays
-        ctx.fillStyle = '#000000';
-        ctx.fillRect(this.x + 10, this.y + 35, 6, 8);
-        ctx.fillRect(this.x + 24, this.y + 35, 6, 8);
-    }
-    
-    drawSpiral(ctx) {
-        const gradient = ctx.createLinearGradient(this.x, this.y, this.x + this.width, this.y + this.height);
-        gradient.addColorStop(0, '#ffaa00');
-        gradient.addColorStop(1, '#cc8800');
-        ctx.fillStyle = gradient;
-        ctx.fillRect(this.x + 6, this.y, 20, 32);
-        
-        ctx.fillStyle = '#ffcc44';
-        ctx.fillRect(this.x + 1, this.y + 14, 30, 6);
-        
-        ctx.fillStyle = '#cc8800';
-        ctx.fillRect(this.x + 10, this.y + 6, 12, 8);
-        
-        // Spiral indicator
-        ctx.fillStyle = '#ff6600';
-        ctx.fillRect(this.x + 14, this.y + 2, 4, 4);
-    }
-    
-    drawEliteHunter(ctx) {
-        const gradient = ctx.createLinearGradient(this.x, this.y, this.x + this.width, this.y + this.height);
-        gradient.addColorStop(0, '#ff0080');
-        gradient.addColorStop(0.5, '#ff44aa');
-        gradient.addColorStop(1, '#aa0044');
-        ctx.fillStyle = gradient;
-        ctx.fillRect(this.x + 5, this.y, 30, 40);
-        
-        ctx.fillStyle = '#ff44aa';
-        ctx.fillRect(this.x, this.y + 12, 40, 12);
-        
-        ctx.fillStyle = '#aa0044';
-        ctx.fillRect(this.x + 12, this.y + 5, 16, 8);
-        
-        // Enhanced targeting
-        ctx.fillStyle = '#ff0000';
-        ctx.fillRect(this.x + 15, this.y + 2, 8, 3);
-        ctx.fillRect(this.x + 17, this.y, 4, 2);
-    }
-    
-    drawEliteBomber(ctx) {
-        const gradient = ctx.createLinearGradient(this.x, this.y, this.x + this.width, this.y + this.height);
-        gradient.addColorStop(0, '#8B4513');
-        gradient.addColorStop(0.5, '#A0522D');
-        gradient.addColorStop(1, '#654321');
-        ctx.fillStyle = gradient;
-        ctx.fillRect(this.x + 5, this.y, 45, 55);
-        
-        ctx.fillStyle = '#A0522D';
-        ctx.fillRect(this.x, this.y + 20, 55, 20);
-        
-        ctx.fillStyle = '#654321';
-        ctx.fillRect(this.x + 20, this.y + 8, 15, 15);
-        
-        // Multiple bomb bays
-        ctx.fillStyle = '#000000';
-        for (let i = 0; i < 4; i++) {
-            ctx.fillRect(this.x + 8 + i * 10, this.y + 45, 6, 8);
-        }
-    }
-    
-    drawEliteSpiral(ctx) {
-        const gradient = ctx.createLinearGradient(this.x, this.y, this.x + this.width, this.y + this.height);
-        gradient.addColorStop(0, '#ffaa00');
-        gradient.addColorStop(0.5, '#ffcc44');
-        gradient.addColorStop(1, '#cc8800');
-        ctx.fillStyle = gradient;
-        ctx.fillRect(this.x + 4, this.y, 30, 38);
-        
-        ctx.fillStyle = '#ffcc44';
-        ctx.fillRect(this.x, this.y + 14, 38, 8);
-        
-        ctx.fillStyle = '#cc8800';
-        ctx.fillRect(this.x + 12, this.y + 6, 14, 10);
-        
-        // Multiple spiral indicators
-        ctx.fillStyle = '#ff6600';
-        for (let i = 0; i < 3; i++) {
-            ctx.fillRect(this.x + 12 + i * 6, this.y + 2, 3, 3);
-        }
-    }
-    
-    drawTurret(ctx) {
-        // Base
-        const baseGrad = ctx.createLinearGradient(this.x, this.y, this.x, this.y + this.height);
-        baseGrad.addColorStop(0, '#444a55');
-        baseGrad.addColorStop(1, '#262a33');
-        ctx.fillStyle = baseGrad;
-        ctx.fillRect(this.x + 2, this.y + 10, this.width - 4, this.height - 12);
-
-        // Mount
-        ctx.fillStyle = '#667080';
-        ctx.fillRect(this.x + 8, this.y + 6, this.width - 16, 10);
-
-        // Barrel pointing down toward player area
-        ctx.fillStyle = '#99a6b8';
-        ctx.fillRect(this.x + this.width/2 - 3, this.y + 2, 6, 18);
-
-        // Lights
-        ctx.fillStyle = '#ff3344';
-        ctx.fillRect(this.x + 6, this.y + this.height - 8, 4, 4);
-        ctx.fillRect(this.x + this.width - 10, this.y + this.height - 8, 4, 4);
-    }
-    
-    drawBasic(ctx) {
-        const gradient = ctx.createLinearGradient(this.x, this.y, this.x + this.width, this.y + this.height);
-        gradient.addColorStop(0, '#ff8800');
-        gradient.addColorStop(1, '#cc6600');
-        ctx.fillStyle = gradient;
-        ctx.fillRect(this.x + 5, this.y, 20, 30);
-        
-        ctx.fillStyle = '#ffaa44';
-        ctx.fillRect(this.x, this.y + 10, 30, 15);
+        ctx.restore();
     }
 }
 
@@ -1524,458 +1744,90 @@ class Bullet {
         this.owner = owner;
         this.type = type;
         this.angle = angle;
-        this.width = 4;
-        this.height = 8;
-        this.damage = 25;
-        this.vx = 0;
-        this.vy = 0;
         this.target = null;
-        this.life = 1.0;
+        this.piercing = false;
+        this.pierceCount = 0;
         
-        if (owner === 'player') {
-            this.setupPlayerBullet();
+        this.setupBullet();
+    }
+    
+    setupBullet() {
+        if (this.owner === 'player') {
+            const weapon = WeaponSystem.getWeapon(game.player.currentWeaponType, game.player.weaponLevel);
+            this.damage = weapon.damage * game.player.upgrades.damage;
+            this.speed = weapon.bulletSpeed;
+            this.width = weapon.bulletWidth;
+            this.height = weapon.bulletHeight;
+            this.color = weapon.bulletColor;
+            this.vy = -this.speed;
+            this.vx = 0;
+            
+            if (weapon.piercing) {
+                this.piercing = true;
+                this.pierceCount = weapon.pierceCount || 2;
+            }
         } else {
-            this.setupEnemyBullet();
-        }
-    }
-    
-    setupPlayerBullet() {
-        switch (this.type) {
-            case 'pulse':
-                this.speed = -500;
-                this.color = '#00ffff';
-                this.width = 6;
-                this.height = 10;
-                break;
-            case 'laser':
-                this.speed = -700;
-                this.color = '#ff0080';
-                this.width = 3;
-                this.height = 15;
-                this.damage = 40;
-                break;
-            case 'spread':
-                this.speed = -400;
-                this.color = '#ffff00';
-                this.width = 4;
-                this.height = 8;
-                break;
-            case 'homing':
-                this.speed = -300;
-                this.color = '#00ff00';
-                this.width = 5;
-                this.height = 8;
-                this.damage = 35;
-                break;
-            default:
-                this.speed = -500;
-                this.color = '#00ffff';
-        }
-        this.vy = this.speed;
-    }
-    
-    setupEnemyBullet() {
-        switch (this.type) {
-            case 'bomb':
-                this.speed = 200;
-                this.color = '#8B4513';
-                this.width = 8;
-                this.height = 8;
-                this.damage = 40;
-                break;
-            case 'heavy':
-                this.speed = 250;
-                this.color = '#8844ff';
-                this.width = 6;
-                this.height = 12;
-                this.damage = 30;
-                break;
-            case 'homing':
-                this.speed = 180;
-                this.color = '#ff0080';
-                this.width = 5;
-                this.height = 8;
-                this.damage = 25;
-                break;
-            case 'spiral':
-                this.speed = 150;
-                this.color = '#ffaa00';
-                this.width = 4;
-                this.height = 6;
-                this.damage = 20;
-                break;
-            case 'fast':
-                this.speed = 400;
-                this.color = '#ff4444';
-                this.width = 3;
-                this.height = 6;
-                this.damage = 15;
-                break;
-            default:
-                this.speed = 300;
-                this.color = '#ff4444';
-        }
-        this.vy = this.speed;
-        
-        // Set up movement based on bullet type
-        if (this.type === 'spiral') {
-            this.vx = Math.cos(this.angle) * this.speed * 0.3;
-            this.vy = Math.sin(this.angle) * this.speed * 0.3 + this.speed;
-        }
-    }
-    
-    update(deltaTime) {
-        // Update position based on type
-        switch (this.type) {
-            case 'spiral':
-                this.x += this.vx * deltaTime / 1000;
-                this.y += this.vy * deltaTime / 1000;
-                // Add spiral motion
-                this.angle += deltaTime / 100;
+            const configs = {
+                'basic': { damage: 20, speed: 300, width: 4, height: 8, color: '#ff4444' },
+                'heavy': { damage: 30, speed: 250, width: 6, height: 12, color: '#8844ff' },
+                'bomb': { damage: 40, speed: 200, width: 8, height: 8, color: '#8B4513' },
+                'homing': { damage: 25, speed: 180, width: 5, height: 8, color: '#ff0080' },
+                'spiral': { damage: 20, speed: 150, width: 4, height: 6, color: '#ffaa00' }
+            };
+            
+            const config = configs[this.type] || configs['basic'];
+            this.damage = config.damage;
+            this.speed = config.speed;
+            this.width = config.width;
+            this.height = config.height;
+            this.color = config.color;
+            this.vy = this.speed;
+            this.vx = 0;
+            
+            if (this.type === 'spiral') {
                 this.vx = Math.cos(this.angle) * this.speed * 0.3;
-                break;
-            case 'homing':
-                if (this.target && this.target.health > 0) {
-                    // Homing logic for both player and enemy bullets
-                    const dx = this.target.x - this.x;
-                    const dy = this.target.y - this.y;
-                    const distance = Math.sqrt(dx * dx + dy * dy);
-                    if (distance > 0) {
-                        const homingForce = this.owner === 'player' ? 100 : 50;
-                        this.vx += (dx / distance) * homingForce * deltaTime / 1000;
-                        this.vy += (dy / distance) * homingForce * deltaTime / 1000;
-                        // Limit speed
-                        const speed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
-                        if (speed > Math.abs(this.speed)) {
-                            this.vx = (this.vx / speed) * Math.abs(this.speed);
-                            this.vy = (this.vy / speed) * Math.abs(this.speed);
-                        }
-                    }
-                } else {
-                    // Fallback to straight movement if no target
-                    this.y += this.vy * deltaTime / 1000;
-                }
-                break;
-            default:
-                this.y += this.vy * deltaTime / 1000;
-        }
-        
-        // Decay for certain bullet types
-        if (this.type === 'bomb') {
-            this.life -= deltaTime / 5000; // Bombs have limited life
-        }
-    }
-    
-    render(ctx) {
-        ctx.save();
-        
-        // Special rendering for different bullet types
-        switch (this.type) {
-            case 'bomb':
-                ctx.fillStyle = this.color;
-                ctx.fillRect(this.x - this.width/2, this.y, this.width, this.height);
-                // Add fuse
-                ctx.fillStyle = '#ffff00';
-                ctx.fillRect(this.x - 1, this.y - 3, 2, 3);
-                break;
-            case 'laser':
-                ctx.fillStyle = this.color;
-                ctx.fillRect(this.x - this.width/2, this.y, this.width, this.height);
-                // Add laser glow
-                ctx.shadowColor = this.color;
-                ctx.shadowBlur = 10;
-                ctx.fillRect(this.x - this.width/2, this.y, this.width, this.height);
-                break;
-            case 'spiral':
-                ctx.translate(this.x, this.y);
-                ctx.rotate(this.angle);
-                ctx.fillStyle = this.color;
-                ctx.fillRect(-this.width/2, 0, this.width, this.height);
-                break;
-            default:
-                ctx.fillStyle = this.color;
-                ctx.fillRect(this.x - this.width/2, this.y, this.width, this.height);
-                // Add glow effect
-                ctx.shadowColor = this.color;
-                ctx.shadowBlur = 5;
-                ctx.fillRect(this.x - this.width/2, this.y, this.width, this.height);
-        }
-        
-        ctx.shadowBlur = 0;
-        ctx.restore();
-    }
-}
-
-// PowerUp class
-// PowerUps are items that can be collected by the player to gain a benefit
-class PowerUp {
-    constructor(x, y) {
-        this.x = x;
-        this.y = y;
-        this.width = 20;
-        this.height = 20;
-        this.speed = 100;
-        this.rotation = 0;
-        
-        // Determine power-up type and tier
-        const rand = Math.random();
-        if (rand < 0.15) {
-            this.type = 'weapon';
-            this.tier = this.getRandomTier();
-        } else if (rand < 0.3) {
-            this.type = 'health';
-            this.tier = this.getRandomTier();
-        } else if (rand < 0.45) {
-            this.type = 'speed';
-            this.tier = this.getRandomTier();
-        } else if (rand < 0.6) {
-            this.type = 'fireRate';
-            this.tier = this.getRandomTier();
-        } else if (rand < 0.75) {
-            this.type = 'damage';
-            this.tier = this.getRandomTier();
-        } else if (rand < 0.9) {
-            this.type = 'shield';
-            this.tier = this.getRandomTier();
-        } else {
-            this.type = 'multi';
-            this.tier = 'legendary';
-        }
-        
-        this.setupPowerUp();
-    }
-    
-    getRandomTier() {
-        const rand = Math.random();
-        if (rand < 0.6) return 'basic';
-        if (rand < 0.85) return 'enhanced';
-        return 'legendary';
-    }
-    
-    setupPowerUp() {
-        switch (this.tier) {
-            case 'basic':
-                this.size = 16;
-                this.glowIntensity = 0.3;
-                break;
-            case 'enhanced':
-                this.size = 20;
-                this.glowIntensity = 0.6;
-                break;
-            case 'legendary':
-                this.size = 24;
-                this.glowIntensity = 1.0;
-                break;
+                this.vy = Math.sin(this.angle) * this.speed * 0.3 + this.speed;
+            }
         }
     }
     
     update(deltaTime) {
-        this.y += this.speed * deltaTime / 1000;
-        this.rotation += deltaTime / 100;
-    }
-    
-    apply(player) {
-        const multiplier = this.tier === 'basic' ? 1 : this.tier === 'enhanced' ? 1.5 : 2;
-        
-        switch (this.type) {
-            case 'weapon':
-                player.upgradeWeapon();
-                break;
-            case 'health':
-                const healAmount = Math.floor(50 * multiplier);
-                player.heal(healAmount);
-                break;
-            case 'speed':
-                const speedBoost = 0.3 * multiplier;
-                player.upgrades.speed = Math.min(3, player.upgrades.speed + speedBoost);
-                break;
-            case 'fireRate':
-                const fireRateBoost = 0.5 * multiplier;
-                player.upgrades.fireRate = Math.min(4, player.upgrades.fireRate + fireRateBoost);
-                break;
-            case 'damage':
-                const damageBoost = 0.3 * multiplier;
-                player.upgrades.damage = Math.min(3, player.upgrades.damage + damageBoost);
-                break;
-            case 'shield':
-                // Temporary shield effect
-                player.shield = Math.floor(50 * multiplier);
-                break;
-            case 'multi':
-                // Legendary multi-upgrade
-                player.upgradeWeapon();
-                player.heal(100);
-                player.upgradeShip('speed');
-                player.upgradeShip('fireRate');
-                player.upgradeShip('damage');
-                break;
+        if (this.type === 'homing' && this.target && this.target.health > 0) {
+            const dx = this.target.x - this.x;
+            const dy = this.target.y - this.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            if (distance > 0) {
+                const homingForce = this.owner === 'player' ? 100 : 50;
+                this.vx += (dx / distance) * homingForce * deltaTime / 1000;
+                this.vy += (dy / distance) * homingForce * deltaTime / 1000;
+                const speed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
+                if (speed > Math.abs(this.speed)) {
+                    this.vx = (this.vx / speed) * Math.abs(this.speed);
+                    this.vy = (this.vy / speed) * Math.abs(this.speed);
+                }
+            }
+        } else if (this.type === 'spiral') {
+            this.x += this.vx * deltaTime / 1000;
+            this.y += this.vy * deltaTime / 1000;
+            this.angle += deltaTime / 100;
+            this.vx = Math.cos(this.angle) * this.speed * 0.3;
+        } else {
+            this.y += this.vy * deltaTime / 1000;
+            this.x += this.vx * deltaTime / 1000;
         }
     }
     
     render(ctx) {
         ctx.save();
-        ctx.translate(this.x + this.width/2, this.y + this.height/2);
-        ctx.rotate(this.rotation);
+        ctx.fillStyle = this.color;
+        ctx.fillRect(this.x - this.width/2, this.y - this.height/2, this.width, this.height);
         
-        // Draw glow effect based on tier
-        if (this.glowIntensity > 0) {
-            ctx.shadowColor = this.getColor();
-            ctx.shadowBlur = 10 * this.glowIntensity;
+        if (this.owner === 'player') {
+            ctx.shadowColor = this.color;
+            ctx.shadowBlur = 5;
+            ctx.fillRect(this.x - this.width/2, this.y - this.height/2, this.width, this.height);
         }
-        
-        const halfSize = this.size / 2;
-        
-        switch (this.type) {
-            case 'weapon':
-                this.drawWeaponPowerUp(ctx, halfSize);
-                break;
-            case 'health':
-                this.drawHealthPowerUp(ctx, halfSize);
-                break;
-            case 'speed':
-                this.drawSpeedPowerUp(ctx, halfSize);
-                break;
-            case 'fireRate':
-                this.drawFireRatePowerUp(ctx, halfSize);
-                break;
-            case 'damage':
-                this.drawDamagePowerUp(ctx, halfSize);
-                break;
-            case 'shield':
-                this.drawShieldPowerUp(ctx, halfSize);
-                break;
-            case 'multi':
-                this.drawMultiPowerUp(ctx, halfSize);
-                break;
-        }
-        
-        // Draw tier border
-        this.drawTierBorder(ctx, halfSize);
-        
-        ctx.shadowBlur = 0;
         ctx.restore();
-    }
-    
-    getColor() {
-        switch (this.type) {
-            case 'weapon': return '#ffff00';
-            case 'health': return '#ff00ff';
-            case 'speed': return '#00ffff';
-            case 'fireRate': return '#ff8800';
-            case 'damage': return '#ff0000';
-            case 'shield': return '#00ff00';
-            case 'multi': return '#ff00ff';
-            default: return '#ffffff';
-        }
-    }
-    
-    drawTierBorder(ctx, halfSize) {
-        switch (this.tier) {
-            case 'enhanced':
-                ctx.strokeStyle = '#00ff00';
-                ctx.lineWidth = 2;
-                ctx.strokeRect(-halfSize - 2, -halfSize - 2, this.size + 4, this.size + 4);
-                break;
-            case 'legendary':
-                ctx.strokeStyle = '#ffd700';
-                ctx.lineWidth = 3;
-                ctx.strokeRect(-halfSize - 3, -halfSize - 3, this.size + 6, this.size + 6);
-                break;
-        }
-    }
-    
-    drawWeaponPowerUp(ctx, halfSize) {
-        ctx.fillStyle = '#ffff00';
-        ctx.fillRect(-halfSize, -halfSize, this.size, this.size);
-        ctx.fillStyle = '#ffaa00';
-        ctx.fillRect(-halfSize/2, -halfSize/2, halfSize, halfSize);
-        
-        // Weapon symbol
-        ctx.fillStyle = '#ff6600';
-        ctx.fillRect(-2, -halfSize + 2, 4, halfSize - 4);
-        ctx.fillRect(-halfSize + 2, -2, halfSize - 4, 4);
-    }
-    
-    drawHealthPowerUp(ctx, halfSize) {
-        ctx.fillStyle = '#ff00ff';
-        ctx.fillRect(-halfSize, -halfSize, this.size, this.size);
-        ctx.fillStyle = '#ff44ff';
-        ctx.fillRect(-halfSize/2, -halfSize/2, halfSize, halfSize);
-        
-        // Cross symbol
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(-2, -halfSize + 2, 4, this.size - 4);
-        ctx.fillRect(-halfSize + 2, -2, this.size - 4, 4);
-    }
-    
-    drawSpeedPowerUp(ctx, halfSize) {
-        ctx.fillStyle = '#00ffff';
-        ctx.fillRect(-halfSize, -halfSize, this.size, this.size);
-        ctx.fillStyle = '#0088ff';
-        ctx.fillRect(-halfSize/2, -halfSize/2, halfSize, halfSize);
-        
-        // Speed lines
-        ctx.fillStyle = '#ffffff';
-        for (let i = 0; i < 3; i++) {
-            ctx.fillRect(-halfSize + 2 + i * 4, -halfSize + 2, 2, this.size - 4);
-        }
-    }
-    
-    drawFireRatePowerUp(ctx, halfSize) {
-        ctx.fillStyle = '#ff8800';
-        ctx.fillRect(-halfSize, -halfSize, this.size, this.size);
-        ctx.fillStyle = '#ff4400';
-        ctx.fillRect(-halfSize/2, -halfSize/2, halfSize, halfSize);
-        
-        // Fire symbol
-        ctx.fillStyle = '#ff0000';
-        ctx.fillRect(-halfSize + 2, -halfSize + 2, this.size - 4, 2);
-        ctx.fillRect(-halfSize + 2, -halfSize + 4, 2, this.size - 8);
-        ctx.fillRect(-halfSize + 4, halfSize - 6, this.size - 8, 2);
-    }
-    
-    drawDamagePowerUp(ctx, halfSize) {
-        ctx.fillStyle = '#ff0000';
-        ctx.fillRect(-halfSize, -halfSize, this.size, this.size);
-        ctx.fillStyle = '#aa0000';
-        ctx.fillRect(-halfSize/2, -halfSize/2, halfSize, halfSize);
-        
-        // Damage symbol
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(-halfSize + 2, -halfSize + 2, this.size - 4, 2);
-        ctx.fillRect(-halfSize + 2, -halfSize + 4, 2, this.size - 8);
-        ctx.fillRect(-halfSize + 4, halfSize - 6, this.size - 8, 2);
-        ctx.fillRect(-halfSize + 6, -halfSize + 6, 2, this.size - 12);
-    }
-    
-    drawShieldPowerUp(ctx, halfSize) {
-        ctx.fillStyle = '#00ff00';
-        ctx.fillRect(-halfSize, -halfSize, this.size, this.size);
-        ctx.fillStyle = '#00aa00';
-        ctx.fillRect(-halfSize/2, -halfSize/2, halfSize, halfSize);
-        
-        // Shield symbol
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(-halfSize + 2, -halfSize + 2, this.size - 4, this.size - 4);
-        ctx.fillStyle = '#00ff00';
-        ctx.fillRect(-halfSize + 4, -halfSize + 4, this.size - 8, this.size - 8);
-    }
-    
-    drawMultiPowerUp(ctx, halfSize) {
-        // Rainbow effect for legendary multi-upgrade
-        const colors = ['#ff0000', '#ff8800', '#ffff00', '#00ff00', '#00ffff', '#0088ff', '#8800ff'];
-        const segmentSize = this.size / colors.length;
-        
-        for (let i = 0; i < colors.length; i++) {
-            ctx.fillStyle = colors[i];
-            ctx.fillRect(-halfSize + i * segmentSize, -halfSize, segmentSize, this.size);
-        }
-        
-        // Star symbol
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(-2, -halfSize + 2, 4, this.size - 4);
-        ctx.fillRect(-halfSize + 2, -2, this.size - 4, 4);
-        ctx.fillRect(-halfSize/2, -halfSize/2, halfSize, halfSize);
     }
 }
 
@@ -2004,6 +1856,186 @@ class Particle {
         ctx.fillStyle = this.color;
         ctx.fillRect(this.x - this.size/2, this.y - this.size/2, this.size, this.size);
         ctx.globalAlpha = 1;
+    }
+}
+
+// Weapon System - manages all 8 weapon types
+class WeaponSystem {
+    static weapons = {
+        'pistol': {
+            name: 'Pistol',
+            baseFireRate: 300,
+            baseDamage: 20,
+            baseBulletSpeed: 500,
+            baseBulletWidth: 4,
+            baseBulletHeight: 8,
+            bulletColor: '#ffffff',
+            upgrades: [
+                { fireRate: 1.25, damage: 1.20, projectiles: 1 },
+                { fireRate: 1.50, damage: 1.40, projectiles: 1 },
+                { fireRate: 1.75, damage: 1.60, projectiles: 1 },
+                { fireRate: 2.00, damage: 1.80, projectiles: 1, special: 'piercing' }
+            ]
+        },
+        'machinegun': {
+            name: 'Machine Gun',
+            baseFireRate: 150,
+            baseDamage: 15,
+            baseBulletSpeed: 600,
+            baseBulletWidth: 3,
+            baseBulletHeight: 6,
+            bulletColor: '#ffff00',
+            upgrades: [
+                { fireRate: 1.25, damage: 1.20, projectiles: 1 },
+                { fireRate: 1.50, damage: 1.40, projectiles: 1 },
+                { fireRate: 1.75, damage: 1.60, projectiles: 1 },
+                { fireRate: 2.00, damage: 1.80, projectiles: 1, special: 'rapidFire' }
+            ]
+        },
+        'bazooka': {
+            name: 'Bazooka',
+            baseFireRate: 800,
+            baseDamage: 80,
+            baseBulletSpeed: 400,
+            baseBulletWidth: 12,
+            baseBulletHeight: 12,
+            bulletColor: '#ff4400',
+            explosionRadius: 40,
+            upgrades: [
+                { fireRate: 1.25, damage: 1.20, projectiles: 1 },
+                { fireRate: 1.50, damage: 1.40, projectiles: 1 },
+                { fireRate: 1.75, damage: 1.60, projectiles: 1 },
+                { fireRate: 2.00, damage: 1.80, projectiles: 1, special: 'chainExplosion' }
+            ]
+        },
+        'sniper': {
+            name: 'Sniper Rifle',
+            baseFireRate: 1000,
+            baseDamage: 100,
+            baseBulletSpeed: 800,
+            baseBulletWidth: 2,
+            baseBulletHeight: 20,
+            bulletColor: '#00ffff',
+            upgrades: [
+                { fireRate: 1.25, damage: 1.20, projectiles: 1 },
+                { fireRate: 1.50, damage: 1.40, projectiles: 1 },
+                { fireRate: 1.75, damage: 1.60, projectiles: 1 },
+                { fireRate: 2.00, damage: 1.80, projectiles: 1, special: 'critical' }
+            ]
+        },
+        'glock': {
+            name: 'Glock',
+            baseFireRate: 250,
+            baseDamage: 25,
+            baseBulletSpeed: 550,
+            baseBulletWidth: 4,
+            baseBulletHeight: 7,
+            bulletColor: '#cccccc',
+            upgrades: [
+                { fireRate: 1.25, damage: 1.20, projectiles: 1 },
+                { fireRate: 1.50, damage: 1.40, projectiles: 1 },
+                { fireRate: 1.75, damage: 1.60, projectiles: 1 },
+                { fireRate: 2.00, damage: 1.80, projectiles: 1, special: 'doubleTap' }
+            ]
+        },
+        'ak47': {
+            name: 'AK-47',
+            baseFireRate: 200,
+            baseDamage: 30,
+            baseBulletSpeed: 580,
+            baseBulletWidth: 4,
+            baseBulletHeight: 8,
+            bulletColor: '#8B4513',
+            upgrades: [
+                { fireRate: 1.25, damage: 1.20, projectiles: 1 },
+                { fireRate: 1.50, damage: 1.40, projectiles: 1 },
+                { fireRate: 1.75, damage: 1.60, projectiles: 1 },
+                { fireRate: 2.00, damage: 1.80, projectiles: 1, special: 'burst' }
+            ]
+        },
+        'shotgun': {
+            name: 'Shotgun',
+            baseFireRate: 600,
+            baseDamage: 40,
+            baseBulletSpeed: 450,
+            baseBulletWidth: 3,
+            baseBulletHeight: 5,
+            bulletColor: '#00ff00',
+            baseProjectiles: 5,
+            upgrades: [
+                { fireRate: 1.25, damage: 1.20, projectiles: 5 },
+                { fireRate: 1.50, damage: 1.40, projectiles: 5 },
+                { fireRate: 1.75, damage: 1.60, projectiles: 6 },
+                { fireRate: 2.00, damage: 1.80, projectiles: 7, special: 'wideSpread' }
+            ]
+        },
+        'laser': {
+            name: 'Laser Rifle',
+            baseFireRate: 400,
+            baseDamage: 50,
+            baseBulletSpeed: 1000,
+            baseBulletWidth: 3,
+            baseBulletHeight: 30,
+            bulletColor: '#ff00ff',
+            upgrades: [
+                { fireRate: 1.25, damage: 1.20, projectiles: 1 },
+                { fireRate: 1.50, damage: 1.40, projectiles: 1 },
+                { fireRate: 1.75, damage: 1.60, projectiles: 1 },
+                { fireRate: 2.00, damage: 1.80, projectiles: 1, special: 'extendedBeam' }
+            ]
+        }
+    };
+    
+    static getWeapon(weaponType, level) {
+        const weapon = this.weapons[weaponType];
+        if (!weapon) return this.weapons['pistol'];
+        
+        const upgrade = level > 1 ? weapon.upgrades[level - 2] : null;
+        
+        return {
+            name: weapon.name,
+            fireRate: upgrade ? weapon.baseFireRate / upgrade.fireRate : weapon.baseFireRate,
+            damage: upgrade ? weapon.baseDamage * upgrade.damage : weapon.baseDamage,
+            bulletSpeed: weapon.baseBulletSpeed,
+            bulletWidth: weapon.baseBulletWidth,
+            bulletHeight: weapon.baseBulletHeight,
+            bulletColor: weapon.bulletColor,
+            projectiles: upgrade ? (upgrade.projectiles || 1) : (weapon.baseProjectiles || 1),
+            special: upgrade ? upgrade.special : null,
+            piercing: upgrade && upgrade.special === 'piercing',
+            pierceCount: 2,
+            shoot: (player, game) => {
+                const projectiles = upgrade ? upgrade.projectiles : (weapon.baseProjectiles || 1);
+                const angleSpread = projectiles > 1 ? Math.PI / 6 : 0;
+                
+                for (let i = 0; i < projectiles; i++) {
+                    const angle = projectiles > 1 ? (i - (projectiles-1)/2) * angleSpread / (projectiles-1) : 0;
+                    const bullet = new Bullet(
+                        player.x + player.width/2,
+                        player.y,
+                        'player',
+                        weaponType
+                    );
+                    if (angle !== 0) {
+                        bullet.vx = Math.sin(angle) * bullet.speed * 0.2;
+                        bullet.vy = -Math.cos(angle) * bullet.speed;
+                    }
+                    game.bullets.push(bullet);
+                }
+            },
+            applyPowerScaling: (bonus) => {
+                weapon.baseDamage *= (1 + bonus);
+                weapon.baseFireRate *= (1 - bonus * 0.1);
+            }
+        };
+    }
+    
+    static getWeaponName(weaponType) {
+        return this.weapons[weaponType]?.name || 'Pistol';
+    }
+    
+    static getAvailableWeapons(currentWeapon) {
+        return Object.keys(this.weapons).filter(w => w !== currentWeapon);
     }
 }
 
