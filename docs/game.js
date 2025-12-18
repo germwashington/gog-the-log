@@ -2,7 +2,17 @@
 // Complete implementation based on 2.0 plan specifications
 
 class Game {
-    constructor() {
+    constructor(options = {}) {
+        this.options = {
+            autoStartLoop: false,
+            ...options
+        };
+
+        // Make the instance available immediately to code paths that reference the global `game`
+        // during initialization / the first `gameLoop()` tick.
+        // (Without this, `new Game()` starts the loop before `game = new Game()` finishes assigning.)
+        game = this;
+
         this.canvas = document.getElementById('gameCanvas');
         this.ctx = this.canvas.getContext('2d');
         this.width = this.canvas.width;
@@ -65,16 +75,26 @@ class Game {
         this.easterEggTriggered = false;
         this.easterEggTimer = 0;
         this.easterEggSequence = '';
+
+        // Loop control
+        this._loopRunning = false;
         
         this.init();
     }
     
     init() {
         this.setupEventListeners();
-        this.createAudioContext();
-        this.player = new Player(this.width / 2, this.height - 100);
-        this.setupStage(1);
-        this.gameLoop();
+        // Defer AudioContext creation until first actual sound to reduce startup cost / surprises.
+        
+        // Minimal, non-blocking initial state so the start screen can paint reliably.
+        // Heavy allocations (player, stars, stage elements) are deferred until `startGame()`.
+        this.currentBackground = this.getStageConfig(1);
+        this.stars = [];
+        this.backgroundElements = [];
+
+        if (this.options.autoStartLoop) {
+            this.startLoop();
+        }
     }
     
     createAudioContext() {
@@ -87,6 +107,9 @@ class Game {
     }
     
     playSound(type, frequency = 440, duration = 0.1) {
+        if (!this.audioContext && this.audioEnabled) {
+            this.createAudioContext();
+        }
         if (!this.audioEnabled || !this.audioContext) return;
         
         const oscillator = this.audioContext.createOscillator();
@@ -229,6 +252,22 @@ class Game {
         // Reset spawn timers
         this.enemySpawnTimer = 0;
         this.shardSpawnTimer = 0;
+    }
+
+    maybeSpawnWeaponDropForNewLevel() {
+        // Weapons drop every 3-4 levels (30% chance at 3, guaranteed by 4).
+        if (this.weaponDropLevelsSinceLast < 3) return;
+
+        if (this.weaponDropLevelsSinceLast === 3) {
+            if (Math.random() < 0.3) {
+                this.spawnWeaponDrop();
+                this.weaponDropLevelsSinceLast = 0;
+            }
+            return;
+        }
+
+        // Guaranteed by level 4+
+        this.spawnWeaponDrop();
         this.weaponDropLevelsSinceLast = 0;
     }
     
@@ -390,6 +429,10 @@ class Game {
         document.getElementById('startScreen').classList.add('hidden');
         document.getElementById('gameOverScreen').classList.add('hidden');
         this.updateUI();
+
+        // Start the render/update loop only once the user actually starts playing.
+        // This keeps initial page load/start screen lightweight and reduces the chance of browser hangs/crashes.
+        this.startLoop();
     }
     
     restartGame() {
@@ -451,6 +494,8 @@ class Game {
             } else {
                 // Move to next level in same stage
                 this.level++;
+                this.weaponDropLevelsSinceLast++;
+                this.maybeSpawnWeaponDropForNewLevel();
                 this.shardsCollectedThisLevel = 0;
                 this.gameState = 'playing';
                 
@@ -473,6 +518,8 @@ class Game {
         setTimeout(() => {
             this.setupStage(newStage);
             this.level = 1;
+            this.weaponDropLevelsSinceLast++;
+            this.maybeSpawnWeaponDropForNewLevel();
             this.shardsCollectedThisLevel = 0;
             this.gameState = 'playing';
             
@@ -685,20 +732,6 @@ class Game {
             if (this.energyShards.length < randomShardsNeeded) {
                 this.spawnEnergyShard();
                 this.shardSpawnTimer = 0;
-            }
-        }
-        
-        // Spawn weapon drops (every 3-4 levels)
-        this.weaponDropLevelsSinceLast++;
-        if (this.weaponDropLevelsSinceLast >= 3) {
-            if (this.weaponDropLevelsSinceLast === 3 && Math.random() < 0.3) {
-                // 30% chance at level 3
-                this.spawnWeaponDrop();
-                this.weaponDropLevelsSinceLast = 0;
-            } else if (this.weaponDropLevelsSinceLast >= 4) {
-                // Guaranteed by level 4
-                this.spawnWeaponDrop();
-                this.weaponDropLevelsSinceLast = 0;
             }
         }
         
@@ -1101,13 +1134,27 @@ class Game {
     }
     
     gameLoop(currentTime = 0) {
+        if (!this._loopRunning) return;
         this.deltaTime = currentTime - this.lastTime;
         this.lastTime = currentTime;
+        // Avoid huge simulation jumps after tab/background throttling
+        if (this.deltaTime > 100) this.deltaTime = 100;
         
         this.update(this.deltaTime);
         this.render();
         
         requestAnimationFrame((time) => this.gameLoop(time));
+    }
+
+    startLoop() {
+        if (this._loopRunning) return;
+        this._loopRunning = true;
+        this.lastTime = performance.now();
+        requestAnimationFrame((time) => this.gameLoop(time));
+    }
+
+    stopLoop() {
+        this._loopRunning = false;
     }
 }
 
@@ -1839,16 +1886,20 @@ class Particle {
         this.vx = (Math.random() - 0.5) * 200;
         this.vy = (Math.random() - 0.5) * 200;
         this.life = 1.0;
-        this.decay = Math.random() * 0.02 + 0.01;
+        // Life decay should be time-based (per second), not frame-based.
+        // Otherwise, when FPS drops, particles live much longer, causing a runaway feedback loop.
+        this.decayPerSecond = Math.random() * 1.2 + 0.8; // ~0.8-2.0 life/sec
         this.color = color;
         this.size = Math.random() * 4 + 2;
     }
     
     update(deltaTime) {
-        this.x += this.vx * deltaTime / 1000;
-        this.y += this.vy * deltaTime / 1000;
-        this.life -= this.decay;
-        this.size *= 0.99;
+        const dt = deltaTime / 1000;
+        this.x += this.vx * dt;
+        this.y += this.vy * dt;
+        this.life -= this.decayPerSecond * dt;
+        // Time-based shrink; tuned to feel similar to the old per-frame shrink at ~60fps
+        this.size *= Math.pow(0.99, dt * 60);
     }
     
     render(ctx) {
@@ -2041,6 +2092,10 @@ class WeaponSystem {
 
 // Initialize game
 let game;
-window.addEventListener('load', () => {
-    game = new Game();
-});
+
+// Expose a stable boot hook for `boot.js` to call.
+// This avoids loading/instantiating the game during initial page paint.
+window.bootGame = () => {
+    if (!game) game = new Game({ autoStartLoop: false });
+    return game;
+};
