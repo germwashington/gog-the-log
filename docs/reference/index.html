@@ -66,34 +66,6 @@
             <p>Press P to continue</p>
         </div>
     </div>
-    <script>
-        // Check if running via file:// protocol (ES6 modules don't work with file://)
-        if (window.location.protocol === 'file:') {
-            document.body.innerHTML = `
-                <div style="padding: 40px; text-align: center; font-family: Arial, sans-serif;">
-                    <h1 style="color: #ff4444;">⚠️ CORS Error: File Protocol Not Supported</h1>
-                    <p style="font-size: 18px; margin: 20px 0;">
-                        This game uses ES6 modules which require an HTTP server.<br>
-                        You cannot run it by opening the HTML file directly.
-                    </p>
-                    <p style="font-size: 16px; margin: 20px 0;">
-                        <strong>To run the game:</strong>
-                    </p>
-                    <ol style="text-align: left; display: inline-block; margin: 20px auto;">
-                        <li style="margin: 10px 0;">Open a terminal in the <code>docs</code> directory</li>
-                        <li style="margin: 10px 0;">Run: <code style="background: #333; color: #0f0; padding: 5px 10px; border-radius: 3px;">python3 -m http.server 8006 --bind 127.0.0.1</code></li>
-                        <li style="margin: 10px 0;">Open your browser to: <code style="background: #333; color: #0f0; padding: 5px 10px; border-radius: 3px;">http://127.0.0.1:8006/</code></li>
-                    </ol>
-                </div>
-            `;
-        }
-    </script>
-    <script type="module">
-        // Cache buster - append timestamp to force reload
-        const script = document.createElement('script');
-        script.type = 'module';
-        script.src = 'game.js?v=' + Date.now();
-        document.body.appendChild(script);
-    </script>
+    <script src="game.js"></script>
 </body>
 </html>

@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Bookwormy Guy</title>
+</head>
+<body>
+    <h1>Testing Bookwormy Guy Module</h1>
+    <div id="results"></div>
+    <script type="module">
+        import { BookwormyGuy } from './modules/bookwormy-guy.js';
+        
+        const bg = new BookwormyGuy();
+        const results = document.getElementById('results');
+        const tests = [];
+        
+        // Test 1: Enemy types
+        const basicEnemy = bg.getEnemyType('basic');
+        tests.push({
+            name: 'Get Basic Enemy',
+            pass: basicEnemy && basicEnemy.health === 30,
+            result: basicEnemy ? `Health: ${basicEnemy.health}` : 'Failed'
+        });
+        
+        // Test 2: Weapons
+        const pistol = bg.getWeapon('pistol', 1);
+        tests.push({
+            name: 'Get Pistol Level 1',
+            pass: pistol && pistol.baseFireRate === 300,
+            result: pistol ? `Fire Rate: ${pistol.fireRate}ms` : 'Failed'
+        });
+        
+        // Test 3: Level config
+        const level1_1 = bg.getLevelConfig(1, 1);
+        tests.push({
+            name: 'Get Level 1-1 Config',
+            pass: level1_1 && level1_1.spawnRate === 3000,
+            result: level1_1 ? `Spawn Rate: ${level1_1.spawnRate}ms` : 'Failed'
+        });
+        
+        // Test 4: Stage config
+        const stage1 = bg.getStageConfig(1);
+        tests.push({
+            name: 'Get Stage 1 Config',
+            pass: stage1 && stage1.name === 'Deep Space',
+            result: stage1 ? `Name: ${stage1.name}` : 'Failed'
+        });
+        
+        // Test 5: Game config
+        const config = bg.getGameConfig();
+        tests.push({
+            name: 'Get Game Config',
+            pass: config && config.CANVAS_WIDTH === 800,
+            result: config ? `Canvas Width: ${config.CANVAS_WIDTH}` : 'Failed'
+        });
+        
+        // Display results
+        let html = '<h2>Test Results:</h2><ul>';
+        tests.forEach(test => {
+            const status = test.pass ? '✅ PASS' : '❌ FAIL';
+            html += `<li><strong>${test.name}</strong>: ${status} - ${test.result}</li>`;
+        });
+        html += '</ul>';
+        
+        const allPass = tests.every(t => t.pass);
+        html += `<h2>Overall: ${allPass ? '✅ ALL TESTS PASS' : '❌ SOME TESTS FAILED'}</h2>`;
+        
+        results.innerHTML = html;
+        
+        console.log('Bookwormy Guy Tests:', tests);
+    </script>
+</body>
+</html>
+

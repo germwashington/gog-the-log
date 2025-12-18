@@ -1,45 +1,13 @@
 // Tyrian Reborn - Game Engine
-// v3.0: Now using Bookwormy Guy for data storage
-
-import { BookwormyGuy } from './modules/bookwormy-guy.js';
-import { telemetry } from './modules/telemetry-system.js';
-import { DebugPanel } from './modules/debug-panel.js';
-import { wrapWithTelemetry } from './modules/telemetry-wrapper.js';
-
-// Create global Bookwormy Guy instance
-const dataStoreRaw = new BookwormyGuy();
-
-// Wrap with telemetry logging
-const dataStore = wrapWithTelemetry(dataStoreRaw, 'BookwormyGuy', telemetry);
-
-// Build/version marker so we can prove which client code is running (helps debug cache issues)
-console.log('[Tyrian] game.js loaded (build=2025-12-18-weapon-switch-debug-3)');
-
 class Game {
     constructor() {
         this.canvas = document.getElementById('gameCanvas');
         this.ctx = this.canvas.getContext('2d');
-
-        // Expose for debugging in the browser console (read-only convention)
-        try { window.__tyrianGame = this; } catch (e) {}
-        
-        // Bookwormy Guy cache - this module's own memory
-        // Each module maintains its own cache of Bookwormy Guy responses
-        this.bookwormyCache = new Map();
-        
-        // Create cached wrapper for dataStore
-        this.dataStore = this.createCachedDataStore(dataStore);
-        
-        // Get canvas size from Bookwormy Guy config
-        const config = this.dataStore.getGameConfig();
-        this.width = config.CANVAS_WIDTH;
-        this.height = config.CANVAS_HEIGHT;
-        this.canvas.width = this.width;
-        this.canvas.height = this.height;
+        this.width = this.canvas.width;
+        this.height = this.canvas.height;
         
         // Game state
         this.gameState = 'start'; // start, playing, paused, gameOver
-        this.isPaused = false; // For debug panel pause
         this.score = 0;
         this.level = 1;
         this.lastTime = 0;
@@ -57,9 +25,9 @@ class Game {
         this.keys = {};
         this.mousePos = { x: 0, y: 0 };
         
-        // Game settings - get from Bookwormy Guy
+        // Game settings
         this.enemySpawnTimer = 0;
-        this.enemySpawnRate = 2000; // Will be updated from level config
+        this.enemySpawnRate = 2000; // milliseconds
         this.scrollSpeed = 50;
         this.backgroundOffset = 0;
         
@@ -70,68 +38,11 @@ class Game {
         this.init();
     }
     
-    /**
-     * Create a cached wrapper for Bookwormy Guy
-     * This module maintains its own cache - each module has its own memory
-     * Bookwormy Guy responses are immutable, so we cache them per method+arguments
-     */
-    createCachedDataStore(dataStore) {
-        const cache = this.bookwormyCache;
-        
-        return new Proxy(dataStore, {
-            get(target, prop, receiver) {
-                const original = Reflect.get(target, prop, receiver);
-                
-                // For certain methods we want every call to be visible in telemetry
-                // and NOT cached (e.g. weapons while we're still tuning them).
-                const methodName = String(prop);
-                const doNotCache = methodName === 'getWeapon' || methodName === 'getWeaponVisualData';
-                
-                // If it's a function, optionally wrap it with caching
-                if (typeof original === 'function' && prop !== 'constructor') {
-                    // Return original directly when caching is disabled for this method
-                    if (doNotCache) {
-                        return function(...args) {
-                            return original.apply(target, args);
-                        };
-                    }
-                    
-                    return function(...args) {
-                        // Create cache key from method name and arguments
-                        const cacheKey = `${methodName}:${JSON.stringify(args)}`;
-                        
-                        // Check cache first - this module's memory
-                        if (cache.has(cacheKey)) {
-                            return cache.get(cacheKey);
-                        }
-                        
-                        // Call original method
-                        const result = original.apply(target, args);
-                        
-                        // Store in cache (Bookwormy Guy responses are immutable)
-                        cache.set(cacheKey, result);
-                        
-                        return result;
-                    };
-                }
-                
-                return original;
-            }
-        });
-    }
-    
     init() {
         this.setupEventListeners();
         this.createStarField();
         this.createAudioContext();
-        this.player = new Player(this.width / 2, this.height - 100, this.dataStore);
-        
-        // Initialize debug panel
-        this.debugPanel = new DebugPanel(telemetry, this);
-        
-        // Log game initialization
-        telemetry.logEvent('game_initialized', 'Game');
-        
+        this.player = new Player(this.width / 2, this.height - 100);
         this.gameLoop();
     }
     
@@ -194,39 +105,7 @@ class Game {
     setupEventListeners() {
         // Keyboard events
         document.addEventListener('keydown', (e) => {
-            // Only treat as a new press if we didn't already have it down
-            const wasDown = !!this.keys[e.code];
             this.keys[e.code] = true;
-
-            // Debug/telemetry proof: log weapon key presses at the moment they happen
-            // (this is independent of Player.update timing and helps confirm input codes like Numpad3)
-            if (!wasDown) {
-                const weaponKeyMap = {
-                    Digit1: { slot: 1, weaponKey: 'pulse' },
-                    Digit2: { slot: 2, weaponKey: 'laser' },
-                    Digit3: { slot: 3, weaponKey: 'spread' },
-                    Digit4: { slot: 4, weaponKey: 'homing' },
-                    Numpad1: { slot: 1, weaponKey: 'pulse' },
-                    Numpad2: { slot: 2, weaponKey: 'laser' },
-                    Numpad3: { slot: 3, weaponKey: 'spread' },
-                    Numpad4: { slot: 4, weaponKey: 'homing' },
-                };
-                const meta = weaponKeyMap[e.code];
-                if (meta) {
-                    try {
-                        telemetry.logEvent('weapon_keydown', 'Game', { code: e.code, ...meta });
-                    } catch (err) {}
-
-                    // Edge-triggered weapon switching (don't rely on per-frame polling)
-                    try {
-                        if (this.player) {
-                            this.player.switchWeapon(meta.slot, meta.weaponKey, e.code);
-                        }
-                    } catch (err) {
-                        try { telemetry.logError('Game', err); } catch (e) {}
-                    }
-                }
-            }
             
             if (e.code === 'KeyP') {
                 this.togglePause();
@@ -266,9 +145,9 @@ class Game {
         this.stars = [];
         // Far layer - small, slow
         for (let i = 0; i < 60; i++) {
-                this.stars.push({
-                    x: Math.random() * this.width,
-                    y: Math.random() * this.height,
+            this.stars.push({
+                x: Math.random() * this.width,
+                y: Math.random() * this.height,
                 speed: 20 + Math.random() * 20, // px/sec
                 brightness: Math.random() * 0.4 + 0.1,
                 size: 1
@@ -277,8 +156,8 @@ class Game {
         // Mid layer - medium
         for (let i = 0; i < 45; i++) {
             this.stars.push({
-                    x: Math.random() * this.width,
-                    y: Math.random() * this.height,
+                x: Math.random() * this.width,
+                y: Math.random() * this.height,
                 speed: 40 + Math.random() * 40,
                 brightness: Math.random() * 0.5 + 0.2,
                 size: 2
@@ -287,8 +166,8 @@ class Game {
         // Near layer - large, fast
         for (let i = 0; i < 30; i++) {
             this.stars.push({
-                    x: Math.random() * this.width,
-                    y: Math.random() * this.height,
+                x: Math.random() * this.width,
+                y: Math.random() * this.height,
                 speed: 70 + Math.random() * 50,
                 brightness: Math.random() * 0.6 + 0.4,
                 size: 3
@@ -304,9 +183,7 @@ class Game {
         this.enemies = [];
         this.powerUps = [];
         this.particles = [];
-        // IMPORTANT: always pass the (cached + telemetry-wrapped) BookwormyGuy datastore
-        // Otherwise the new Player instance will lose access to BookwormyGuy and weapons will stay at defaults.
-        this.player = new Player(this.width / 2, this.height - 100, this.dataStore);
+        this.player = new Player(this.width / 2, this.height - 100);
         this.enemySpawnTimer = 0;
         
         document.getElementById('startScreen').classList.add('hidden');
@@ -348,8 +225,6 @@ class Game {
     
     update(deltaTime) {
         if (this.gameState !== 'playing') return;
-        // Don't update if paused by debug panel
-        if (this.isPaused) return;
         
         // Update background
         this.backgroundOffset += this.scrollSpeed * deltaTime / 1000;
@@ -440,7 +315,7 @@ class Game {
         
         const type = enemyTypes[Math.floor(Math.random() * enemyTypes.length)];
         const x = Math.random() * (this.width - 60) + 30;
-        this.enemies.push(new Enemy(x, -50, type, this.player, this.dataStore));
+        this.enemies.push(new Enemy(x, -50, type, this.player));
     }
     
     checkCollisions() {
@@ -456,7 +331,7 @@ class Game {
                         enemy.takeDamage(bullet.damage);
                         
                         // Remove bullet
-                            this.bullets.splice(bulletIndex, 1);
+                        this.bullets.splice(bulletIndex, 1);
                         
                         // Play hit sound
                         this.playSound('hit');
@@ -547,18 +422,18 @@ class Game {
             this.particles.forEach(particle => particle.render(this.ctx));
         }
     }
-    
+
     drawBackground(ctx) {
         // Subtle forward motion streaks and horizon bands
         const offset = this.backgroundOffset % this.height;
 
         // Horizon bands
-            ctx.save();
+        ctx.save();
         const bandHeight = 80;
         const grad = ctx.createLinearGradient(0, this.height - bandHeight, 0, this.height);
         grad.addColorStop(0, 'rgba(0, 20, 80, 0.0)');
         grad.addColorStop(1, 'rgba(0, 40, 120, 0.25)');
-                ctx.fillStyle = grad;
+        ctx.fillStyle = grad;
         ctx.fillRect(0, this.height - bandHeight, this.width, bandHeight);
 
         // Moving streak lines
@@ -572,7 +447,7 @@ class Game {
             ctx.lineTo(this.width, lineY);
             ctx.stroke();
         }
-            ctx.restore();
+        ctx.restore();
     }
     
     updateUI() {
@@ -588,14 +463,8 @@ class Game {
         this.deltaTime = currentTime - this.lastTime;
         this.lastTime = currentTime;
         
-        // Skip update/render if paused by debug panel
-        if (!this.isPaused) {
         this.update(this.deltaTime);
         this.render();
-        } else {
-            // Still render when paused so we can see the paused state
-            this.render();
-        }
         
         requestAnimationFrame((time) => this.gameLoop(time));
     }
@@ -603,42 +472,21 @@ class Game {
 
 // Player class
 class Player {
-    constructor(x, y, dataStore = null) {
+    constructor(x, y) {
         this.x = x;
         this.y = y;
-        this.dataStore = dataStore || window.game?.dataStore;
-        
-        // Get player stats from Bookwormy Guy
-        const playerStats = this.dataStore ? this.dataStore.getPlayerBaseStats() : null;
-        const config = this.dataStore ? this.dataStore.getGameConfig() : null;
-        
         this.width = 40;
         this.height = 40;
-        this.speed = playerStats ? playerStats.baseSpeed : 300;
-        this.health = playerStats ? playerStats.baseHealth : 100;
-        this.maxHealth = playerStats ? playerStats.maxHealth : 100;
-        
-        // Weapon system - map game weapons to Bookwormy Guy weapons
-        this.weaponMap = {
-            'pulse': 'pistol',      // Pulse Cannon -> Pistol
-            'laser': 'laser',       // Laser Beam -> Laser Rifle
-            'spread': 'shotgun',    // Spread Shot -> Shotgun
-            'homing': 'bazooka'     // Homing Missile -> Bazooka (closest match)
-        };
-        
+        this.speed = 300;
+        this.health = 100;
+        this.maxHealth = 100;
+        this.weaponType = 'Pulse Cannon';
+        this.fireRate = 200; // milliseconds
+        this.lastShot = 0;
+        this.weaponLevel = 1;
         this.currentWeapon = 0; // Index of current weapon
         this.weapons = ['pulse', 'laser', 'spread', 'homing'];
-        this.weaponLevel = 1;
-        this.lastShot = 0;
-        
-        // Initialize default weapon stats (fallback if Bookwormy Guy fails)
-        this.fireRate = 200; // milliseconds
-        this.weaponType = 'Pulse Cannon';
-        this.weaponDamage = 20;
-        this.weaponProjectiles = 1;
-        
-        // Get initial weapon stats from Bookwormy Guy
-        this.updateWeaponStats();
+        this.weaponNames = ['Pulse Cannon', 'Laser Beam', 'Spread Shot', 'Homing Missile'];
         this.specialWeaponCooldown = 0;
         this.specialWeaponMaxCooldown = 5000; // 5 seconds
         this.upgrades = {
@@ -647,99 +495,6 @@ class Player {
             fireRate: 1,
             damage: 1
         };
-    }
-    
-    updateWeaponStats() {
-        // Get current weapon stats from Bookwormy Guy
-        if (!this.dataStore) return;
-        
-        const weaponKey = this.weapons[this.currentWeapon];
-        const bookwormyWeapon = this.weaponMap[weaponKey];
-        
-        if (bookwormyWeapon) {
-            try {
-                telemetry.logEvent('weapon_stats_request', 'Player', {
-                    weaponKey,
-                    mappedWeapon: bookwormyWeapon,
-                    level: this.weaponLevel,
-                });
-            } catch (e) {}
-
-            let weaponData = null;
-            try {
-                weaponData = this.dataStore.getWeapon(bookwormyWeapon, this.weaponLevel);
-            } catch (err) {
-                try { telemetry.logError('Player', err); } catch (e) {}
-            }
-
-            if (weaponData) {
-                this.fireRate = weaponData.fireRate;
-                this.weaponDamage = weaponData.damage;
-                this.weaponType = weaponData.name;
-                this.weaponProjectiles = weaponData.projectiles || 1;
-                this.weaponBulletSpeed = weaponData.bulletSpeed;
-                this.weaponBulletColor = weaponData.bulletColor;
-            }
-
-            // Proof in event log: always show what we got back (including null)
-            try {
-                telemetry.logEvent('weapon_stats_loaded', 'Player', {
-                    weaponKey,
-                    mappedWeapon: bookwormyWeapon,
-                    level: this.weaponLevel,
-                    weaponDataNull: !weaponData,
-                    projectiles: this.weaponProjectiles,
-                    fireRate: this.fireRate,
-                    bulletColor: this.weaponBulletColor,
-                });
-            } catch (e) {}
-        }
-    }
-
-    /**
-     * Edge-triggered weapon switch (invoked from Game keydown)
-     * Ensures we always refresh BookwormyGuy stats and emit proof events.
-     */
-    switchWeapon(slot, weaponKey, code = null) {
-        const indexMap = { pulse: 0, laser: 1, spread: 2, homing: 3 };
-        const nextIndex = indexMap[weaponKey];
-        if (nextIndex === undefined) return;
-        if (this.currentWeapon === nextIndex) return;
-
-        this.currentWeapon = nextIndex;
-
-        const mappedWeapon = this.weaponMap[weaponKey];
-        try {
-            telemetry.logEvent('weapon_switch', 'Player', {
-                slot,
-                weaponKey,
-                mappedWeapon,
-                level: this.weaponLevel,
-                code,
-            });
-        } catch (e) {}
-
-        // Always update stats from BookwormyGuy on switch
-        this.updateWeaponStats();
-
-        // Pull visuals too (and have it show up in telemetry calls)
-        if (this.dataStore && mappedWeapon) {
-            try {
-                this.dataStore.getWeaponVisualData(mappedWeapon);
-            } catch (e) {}
-        }
-
-        try {
-            telemetry.logEvent('weapon_switch_effective', 'Player', {
-                slot,
-                weaponKey,
-                mappedWeapon,
-                level: this.weaponLevel,
-                projectiles: this.weaponProjectiles,
-                fireRate: this.fireRate,
-                weaponTypeName: this.weaponType,
-            });
-        } catch (e) {}
     }
     
     update(deltaTime, keys) {
@@ -764,9 +519,24 @@ class Player {
         this.x = Math.max(0, Math.min(this.x, game.width - this.width));
         this.y = Math.max(0, Math.min(this.y, game.height - this.height));
         
-        // Weapon switching is handled on keydown in Game.setupEventListeners()
-        // (edge-triggered, guaranteed BookwormyGuy stat refresh + telemetry proof events)
-
+        // Weapon switching
+        if (keys['Digit1']) {
+            this.currentWeapon = 0;
+            this.weaponType = this.weaponNames[0];
+        }
+        if (keys['Digit2']) {
+            this.currentWeapon = 1;
+            this.weaponType = this.weaponNames[1];
+        }
+        if (keys['Digit3']) {
+            this.currentWeapon = 2;
+            this.weaponType = this.weaponNames[2];
+        }
+        if (keys['Digit4']) {
+            this.currentWeapon = 3;
+            this.weaponType = this.weaponNames[3];
+        }
+        
         // Shooting
         if (keys['Space'] || keys['KeyZ']) {
             this.shoot();
@@ -790,38 +560,18 @@ class Player {
         if (now - this.lastShot > fireRate) {
             const weaponType = this.weapons[this.currentWeapon];
             
-            // Get weapon data from Bookwormy Guy (automatically logged by telemetry wrapper)
-            let projectiles = this.weaponProjectiles || 1;
-            if (this.dataStore) {
-                const bookwormyWeapon = this.weaponMap[weaponType];
-                if (bookwormyWeapon) {
-                    // This call is automatically logged by telemetry wrapper
-                    const weaponData = this.dataStore.getWeapon(bookwormyWeapon, this.weaponLevel);
-                    if (weaponData) {
-                        // Update local stats in case they changed
-                        this.fireRate = weaponData.fireRate;
-                        this.weaponDamage = weaponData.damage;
-                        projectiles = weaponData.projectiles || 1;
-                        this.weaponProjectiles = projectiles;
-                    }
-                }
-            }
-            
             switch (weaponType) {
                 case 'pulse':
-                    // Use projectiles from Bookwormy Guy
-                    if (projectiles === 1) {
+                    // Standard pulse cannon with upgrades
+                    if (this.weaponLevel === 1) {
                         game.bullets.push(new Bullet(this.x + this.width/2, this.y, 'player', 'pulse'));
-                    } else if (projectiles === 2) {
+                    } else if (this.weaponLevel === 2) {
                         game.bullets.push(new Bullet(this.x + this.width/2 - 10, this.y, 'player', 'pulse'));
                         game.bullets.push(new Bullet(this.x + this.width/2 + 10, this.y, 'player', 'pulse'));
                     } else {
-                        // 3+ projectiles
                         game.bullets.push(new Bullet(this.x + this.width/2, this.y, 'player', 'pulse'));
-                        for (let i = 1; i < projectiles; i++) {
-                            const offset = (i - 1) * 15 - (projectiles - 2) * 7.5;
-                            game.bullets.push(new Bullet(this.x + this.width/2 + offset, this.y + 10, 'player', 'pulse'));
-                        }
+                        game.bullets.push(new Bullet(this.x + this.width/2 - 15, this.y + 10, 'player', 'pulse'));
+                        game.bullets.push(new Bullet(this.x + this.width/2 + 15, this.y + 10, 'player', 'pulse'));
                     }
                     break;
                 case 'laser':
@@ -829,29 +579,16 @@ class Player {
                     game.bullets.push(new Bullet(this.x + this.width/2, this.y, 'player', 'laser'));
                     break;
                 case 'spread':
-                    // Wide spread shot - horizontal line of bullets
-                    // Use projectiles from Bookwormy Guy (should be 5 for shotgun), fallback to 5
-                    const spreadCount = projectiles >= 1 ? projectiles : 5;
-                    // Original pattern: 5 bullets in horizontal line (i = -2, -1, 0, 1, 2)
-                    // For different counts, center them around 0
-                    const halfSpread = Math.floor(spreadCount / 2);
-                    for (let i = -halfSpread; i <= halfSpread; i++) {
-                        if (spreadCount % 2 === 0 && i === 0) continue; // Skip center for even counts
+                    // Wide spread shot
+                    for (let i = -2; i <= 2; i++) {
                         game.bullets.push(new Bullet(this.x + this.width/2 + i * 8, this.y, 'player', 'spread'));
                     }
                     break;
                 case 'homing':
-                    // Homing missiles - use projectiles from Bookwormy Guy
-                    for (let i = 0; i < projectiles; i++) {
-                        const homingBullet = new Bullet(
-                            this.x + this.width/2 + (i - (projectiles - 1) / 2) * 10, 
-                            this.y, 
-                            'player', 
-                            'homing'
-                        );
-                        homingBullet.target = this.findNearestEnemy();
-                        game.bullets.push(homingBullet);
-                    }
+                    // Homing missiles
+                    const homingBullet = new Bullet(this.x + this.width/2, this.y, 'player', 'homing');
+                    homingBullet.target = this.findNearestEnemy();
+                    game.bullets.push(homingBullet);
                     break;
             }
             game.playSound('shoot');
@@ -895,10 +632,9 @@ class Player {
     }
     
     upgradeWeapon() {
-        if (this.weaponLevel < 5) {
+        if (this.weaponLevel < 3) {
             this.weaponLevel++;
-            // Update weapon stats from Bookwormy Guy after upgrade
-            this.updateWeaponStats();
+            this.weaponType = ['Pulse Cannon', 'Twin Blaster', 'Spread Shot'][this.weaponLevel - 1];
         }
     }
     
@@ -1027,22 +763,16 @@ class Player {
 
 // Enemy class
 class Enemy {
-    constructor(x, y, type = 'basic', player = null, dataStore = null) {
+    constructor(x, y, type = 'basic', player = null) {
         this.x = x;
         this.y = y;
         this.type = type;
         this.player = player;
-        // Enemy gets the cached dataStore from Game (shares Game's cache)
-        this.dataStore = dataStore || window.game?.dataStore;
-        
-        // Initialize defaults
         this.speed = 100;
         this.health = 30;
         this.maxHealth = 30;
         this.points = 100;
         this.fireRate = 1000;
-        this.width = 30;
-        this.height = 30;
         this.lastShot = 0;
         this.movePattern = 0;
         this.moveTimer = 0;
@@ -1050,50 +780,174 @@ class Enemy {
         this.radius = 0;
         this.direction = 1;
         this.aggressionLevel = 1;
-        this.tier = 'medium';
         
-        // Get enemy data from Bookwormy Guy
-        if (this.dataStore) {
-            const enemyData = this.dataStore.getEnemyType(type);
-            if (enemyData) {
-                // Map Bookwormy Guy data to Enemy properties
-                this.speed = enemyData.baseSpeed || this.speed;
-                this.health = enemyData.health || this.health;
-                this.maxHealth = enemyData.health || this.maxHealth;
-                this.points = enemyData.points || this.points;
-                this.fireRate = enemyData.fireRate || this.fireRate;
-                this.width = enemyData.width || this.width;
-                this.height = enemyData.height || this.height;
-                this.radius = enemyData.radius || this.radius;
-                
-                // Derive tier from type name
-                if (type.startsWith('elite_')) {
-                    this.tier = 'elite';
-                    this.aggressionLevel = 3;
-                } else if (['heavy', 'hunter', 'bomber', 'turret', 'spiral'].includes(type)) {
-                    this.tier = 'strong';
-                    this.aggressionLevel = type === 'hunter' || type === 'turret' ? 3 : 2;
-                } else if (['fast', 'zigzag', 'sidewinder'].includes(type)) {
-                    this.tier = 'medium';
-                    this.aggressionLevel = type === 'fast' || type === 'sidewinder' ? 2 : 1;
-                } else if (['scout', 'fighter'].includes(type)) {
-                    this.tier = 'weak';
-                    this.aggressionLevel = type === 'fighter' ? 2 : 1;
-                }
-            } else {
-                // Fallback for 'drone' type that doesn't exist in Bookwormy Guy yet
-                if (type === 'drone') {
-                    this.speed = 100;
-                    this.health = 15;
-                    this.maxHealth = 15;
-                    this.points = 75;
-                    this.width = 18;
-                    this.height = 18;
-                    this.fireRate = 1200;
-                    this.aggressionLevel = 1;
-                    this.tier = 'weak';
-                }
-            }
+        // Configure based on type
+        switch (type) {
+            // Weak enemies
+            case 'scout':
+                this.speed = 120;
+                this.health = 10;
+                this.maxHealth = 10;
+                this.points = 50;
+                this.width = 20;
+                this.height = 20;
+                this.fireRate = 1500;
+                this.aggressionLevel = 1;
+                this.tier = 'weak';
+                break;
+            case 'drone':
+                this.speed = 100;
+                this.health = 15;
+                this.maxHealth = 15;
+                this.points = 75;
+                this.width = 18;
+                this.height = 18;
+                this.fireRate = 1200;
+                this.aggressionLevel = 1;
+                this.tier = 'weak';
+                break;
+            case 'fighter':
+                this.speed = 150;
+                this.health = 20;
+                this.maxHealth = 20;
+                this.points = 100;
+                this.width = 25;
+                this.height = 25;
+                this.fireRate = 1000;
+                this.aggressionLevel = 2;
+                this.tier = 'weak';
+                break;
+            // Medium enemies
+            case 'fast':
+                this.speed = 250;
+                this.health = 15;
+                this.maxHealth = 15;
+                this.points = 150;
+                this.width = 25;
+                this.height = 25;
+                this.fireRate = 800;
+                this.aggressionLevel = 2;
+                this.tier = 'medium';
+                break;
+            case 'zigzag':
+                this.speed = 150;
+                this.health = 25;
+                this.maxHealth = 25;
+                this.points = 180;
+                this.width = 30;
+                this.height = 30;
+                this.fireRate = 1000;
+                this.aggressionLevel = 1;
+                this.tier = 'medium';
+                break;
+            case 'sidewinder':
+                this.speed = 200;
+                this.health = 20;
+                this.maxHealth = 20;
+                this.points = 160;
+                this.width = 28;
+                this.height = 28;
+                this.fireRate = 700;
+                this.aggressionLevel = 2;
+                this.tier = 'medium';
+                break;
+            // Strong enemies
+            case 'heavy':
+                this.speed = 60;
+                this.health = 120;
+                this.maxHealth = 120;
+                this.points = 400;
+                this.fireRate = 600;
+                this.width = 50;
+                this.height = 50;
+                this.aggressionLevel = 1;
+                this.tier = 'strong';
+                break;
+            case 'hunter':
+                this.speed = 180;
+                this.health = 40;
+                this.maxHealth = 40;
+                this.points = 250;
+                this.fireRate = 1200;
+                this.width = 35;
+                this.height = 35;
+                this.aggressionLevel = 3;
+                this.tier = 'strong';
+                break;
+            case 'bomber':
+                this.speed = 80;
+                this.health = 80;
+                this.maxHealth = 80;
+                this.points = 350;
+                this.fireRate = 2000;
+                this.width = 45;
+                this.height = 45;
+                this.aggressionLevel = 2;
+                this.tier = 'strong';
+                break;
+            case 'turret':
+                // Stationary relative to background; movement handled in update()
+                this.speed = 0;
+                this.health = 70;
+                this.maxHealth = 70;
+                this.points = 300;
+                this.fireRate = 1100;
+                this.width = 34;
+                this.height = 34;
+                this.aggressionLevel = 3;
+                this.tier = 'strong';
+                break;
+            case 'spiral':
+                this.speed = 120;
+                this.health = 35;
+                this.maxHealth = 35;
+                this.points = 220;
+                this.fireRate = 900;
+                this.width = 32;
+                this.height = 32;
+                this.radius = 50;
+                this.aggressionLevel = 2;
+                this.tier = 'strong';
+                break;
+            // Elite enemies
+            case 'elite_hunter':
+                this.speed = 220;
+                this.health = 80;
+                this.maxHealth = 80;
+                this.points = 500;
+                this.fireRate = 800;
+                this.width = 40;
+                this.height = 40;
+                this.aggressionLevel = 4;
+                this.tier = 'elite';
+                break;
+            case 'elite_bomber':
+                this.speed = 100;
+                this.health = 150;
+                this.maxHealth = 150;
+                this.points = 600;
+                this.fireRate = 1500;
+                this.width = 55;
+                this.height = 55;
+                this.aggressionLevel = 3;
+                this.tier = 'elite';
+                break;
+            case 'elite_spiral':
+                this.speed = 150;
+                this.health = 60;
+                this.maxHealth = 60;
+                this.points = 450;
+                this.fireRate = 600;
+                this.width = 38;
+                this.height = 38;
+                this.radius = 60;
+                this.aggressionLevel = 3;
+                this.tier = 'elite';
+                break;
+            default: // basic
+                this.width = 30;
+                this.height = 30;
+                this.tier = 'medium';
         }
     }
     
@@ -1104,7 +958,7 @@ class Enemy {
         switch (this.type) {
             // Weak enemies
             case 'scout':
-            this.y += this.speed * deltaTime / 1000;
+                this.y += this.speed * deltaTime / 1000;
                 this.x += Math.sin(this.moveTimer / 300) * 2;
                 break;
             case 'drone':
@@ -1125,8 +979,8 @@ class Enemy {
                 this.x += Math.sin(this.moveTimer / 300) * 4;
                 break;
             case 'sidewinder':
-            this.y += this.speed * deltaTime / 1000 * 0.3;
-            this.x += Math.sin(this.moveTimer / 150) * 5;
+                this.y += this.speed * deltaTime / 1000 * 0.3;
+                this.x += Math.sin(this.moveTimer / 150) * 5;
                 break;
             // Strong enemies
             case 'heavy':
@@ -1135,18 +989,18 @@ class Enemy {
             case 'hunter':
             case 'elite_hunter':
                 // Hunt the player - move towards player position
-            if (this.player) {
-                const dx = this.player.x - this.x;
-                const dy = this.player.y - this.y;
-                const distance = Math.sqrt(dx * dx + dy * dy);
-                if (distance > 0) {
-                    const huntSpeed = this.type === 'elite_hunter' ? 0.7 : 0.5;
-                    this.x += (dx / distance) * this.speed * deltaTime / 1000 * huntSpeed;
-                    this.y += (dy / distance) * this.speed * deltaTime / 1000 * huntSpeed;
+                if (this.player) {
+                    const dx = this.player.x - this.x;
+                    const dy = this.player.y - this.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+                    if (distance > 0) {
+                        const huntSpeed = this.type === 'elite_hunter' ? 0.7 : 0.5;
+                        this.x += (dx / distance) * this.speed * deltaTime / 1000 * huntSpeed;
+                        this.y += (dy / distance) * this.speed * deltaTime / 1000 * huntSpeed;
+                    }
+                } else {
+                    this.y += this.speed * deltaTime / 1000;
                 }
-            } else {
-                this.y += this.speed * deltaTime / 1000;
-            }
                 break;
             case 'bomber':
             case 'elite_bomber':
@@ -1156,11 +1010,11 @@ class Enemy {
             case 'spiral':
             case 'elite_spiral':
                 // Spiral movement pattern
-            this.angle += deltaTime / 100;
-            this.radius += deltaTime / 500;
-            const centerX = game.width / 2;
-            this.x = centerX + Math.cos(this.angle) * this.radius;
-            this.y += this.speed * deltaTime / 1000 * 0.5;
+                this.angle += deltaTime / 100;
+                this.radius += deltaTime / 500;
+                const centerX = game.width / 2;
+                this.x = centerX + Math.cos(this.angle) * this.radius;
+                this.y += this.speed * deltaTime / 1000 * 0.5;
                 break;
             case 'turret':
                 // Move with background scrolling so it appears attached to terrain
@@ -1170,8 +1024,8 @@ class Enemy {
                 }
                 break;
             default: // basic
-            this.y += this.speed * deltaTime / 1000;
-            this.x += Math.sin(this.moveTimer / 500) * 1;
+                this.y += this.speed * deltaTime / 1000;
+                this.x += Math.sin(this.moveTimer / 500) * 1;
         }
         
         // Keep in bounds horizontally
@@ -1179,8 +1033,8 @@ class Enemy {
         
         // Shooting based on aggression level and type
         const shootChance = this.aggressionLevel * 0.0005;
-            if (Math.random() < shootChance && this.y > 50) {
-                this.shoot();
+        if (Math.random() < shootChance && this.y > 50) {
+            this.shoot();
         }
     }
     
@@ -1231,7 +1085,7 @@ class Enemy {
                         ));
                     }
                     break;
-                case 'hunter':
+            case 'hunter':
                     // Homing shot
                     const homingBullet = new Bullet(
                         this.x + this.width/2, 
@@ -1252,8 +1106,8 @@ class Enemy {
                     );
                     tBullet.target = this.player;
                     game.bullets.push(tBullet);
-                    }
-                    break;
+                }
+                break;
                 case 'spiral':
                     // Spiral shot pattern
                     for (let i = 0; i < 3; i++) {
@@ -1396,16 +1250,16 @@ class Enemy {
     }
     
     drawHealthBar(ctx) {
-            const healthPercent = this.health / this.maxHealth;
+        const healthPercent = this.health / this.maxHealth;
         const barHeight = 4;
         const barY = this.y - 8;
         
         // Background
-            ctx.fillStyle = '#ff0000';
+        ctx.fillStyle = '#ff0000';
         ctx.fillRect(this.x, barY, this.width, barHeight);
         
         // Health
-            ctx.fillStyle = '#00ff00';
+        ctx.fillStyle = '#00ff00';
         ctx.fillRect(this.x, barY, this.width * healthPercent, barHeight);
         
         // Border
@@ -1761,12 +1615,12 @@ class Bullet {
                 this.speed = 300;
                 this.color = '#ff4444';
         }
-            this.vy = this.speed;
-            
+        this.vy = this.speed;
+        
         // Set up movement based on bullet type
-            if (this.type === 'spiral') {
-                this.vx = Math.cos(this.angle) * this.speed * 0.3;
-                this.vy = Math.sin(this.angle) * this.speed * 0.3 + this.speed;
+        if (this.type === 'spiral') {
+            this.vx = Math.cos(this.angle) * this.speed * 0.3;
+            this.vy = Math.sin(this.angle) * this.speed * 0.3 + this.speed;
         }
     }
     
@@ -1783,23 +1637,23 @@ class Bullet {
             case 'homing':
                 if (this.target && this.target.health > 0) {
                     // Homing logic for both player and enemy bullets
-            const dx = this.target.x - this.x;
-            const dy = this.target.y - this.y;
-            const distance = Math.sqrt(dx * dx + dy * dy);
-            if (distance > 0) {
-                const homingForce = this.owner === 'player' ? 100 : 50;
-                this.vx += (dx / distance) * homingForce * deltaTime / 1000;
-                this.vy += (dy / distance) * homingForce * deltaTime / 1000;
+                    const dx = this.target.x - this.x;
+                    const dy = this.target.y - this.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+                    if (distance > 0) {
+                        const homingForce = this.owner === 'player' ? 100 : 50;
+                        this.vx += (dx / distance) * homingForce * deltaTime / 1000;
+                        this.vy += (dy / distance) * homingForce * deltaTime / 1000;
                         // Limit speed
-                const speed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
-                if (speed > Math.abs(this.speed)) {
-                    this.vx = (this.vx / speed) * Math.abs(this.speed);
-                    this.vy = (this.vy / speed) * Math.abs(this.speed);
-                }
-            }
-        } else {
+                        const speed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
+                        if (speed > Math.abs(this.speed)) {
+                            this.vx = (this.vx / speed) * Math.abs(this.speed);
+                            this.vy = (this.vy / speed) * Math.abs(this.speed);
+                        }
+                    }
+                } else {
                     // Fallback to straight movement if no target
-            this.y += this.vy * deltaTime / 1000;
+                    this.y += this.vy * deltaTime / 1000;
                 }
                 break;
             default:
@@ -1842,8 +1696,8 @@ class Bullet {
                 ctx.fillStyle = this.color;
                 ctx.fillRect(this.x - this.width/2, this.y, this.width, this.height);
                 // Add glow effect
-            ctx.shadowColor = this.color;
-            ctx.shadowBlur = 5;
+                ctx.shadowColor = this.color;
+                ctx.shadowBlur = 5;
                 ctx.fillRect(this.x - this.width/2, this.y, this.width, this.height);
         }
         
