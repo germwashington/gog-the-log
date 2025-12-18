@@ -82,20 +82,10 @@ class Game {
             get(target, prop, receiver) {
                 const original = Reflect.get(target, prop, receiver);
                 
-                // For certain methods we want every call to be visible in telemetry
-                // and NOT cached (e.g. weapons while we're still tuning them).
                 const methodName = String(prop);
-                const doNotCache = methodName === 'getWeapon' || methodName === 'getWeaponVisualData';
                 
                 // If it's a function, optionally wrap it with caching
                 if (typeof original === 'function' && prop !== 'constructor') {
-                    // Return original directly when caching is disabled for this method
-                    if (doNotCache) {
-                        return function(...args) {
-                            return original.apply(target, args);
-                        };
-                    }
-                    
                     return function(...args) {
                         // Create cache key from method name and arguments
                         const cacheKey = `${methodName}:${JSON.stringify(args)}`;
@@ -213,9 +203,9 @@ class Game {
                 };
                 const meta = weaponKeyMap[e.code];
                 if (meta) {
-                    try {
-                        telemetry.logEvent('weapon_keydown', 'Game', { code: e.code, ...meta });
-                    } catch (err) {}
+                    // try {
+                    //     telemetry.logEvent('weapon_keydown', 'Game', { code: e.code, ...meta });
+                    // } catch (err) {}
 
                     // Edge-triggered weapon switching (don't rely on per-frame polling)
                     try {
@@ -657,13 +647,13 @@ class Player {
         const bookwormyWeapon = this.weaponMap[weaponKey];
         
         if (bookwormyWeapon) {
-            try {
-                telemetry.logEvent('weapon_stats_request', 'Player', {
-                    weaponKey,
-                    mappedWeapon: bookwormyWeapon,
-                    level: this.weaponLevel,
-                });
-            } catch (e) {}
+            // try {
+            //     telemetry.logEvent('weapon_stats_request', 'Player', {
+            //         weaponKey,
+            //         mappedWeapon: bookwormyWeapon,
+            //         level: this.weaponLevel,
+            //     });
+            // } catch (e) {}
 
             let weaponData = null;
             try {
@@ -681,18 +671,18 @@ class Player {
                 this.weaponBulletColor = weaponData.bulletColor;
             }
 
-            // Proof in event log: always show what we got back (including null)
-            try {
-                telemetry.logEvent('weapon_stats_loaded', 'Player', {
-                    weaponKey,
-                    mappedWeapon: bookwormyWeapon,
-                    level: this.weaponLevel,
-                    weaponDataNull: !weaponData,
-                    projectiles: this.weaponProjectiles,
-                    fireRate: this.fireRate,
-                    bulletColor: this.weaponBulletColor,
-                });
-            } catch (e) {}
+            // // Proof in event log: always show what we got back (including null)
+            // try {
+            //     telemetry.logEvent('weapon_stats_loaded', 'Player', {
+            //         weaponKey,
+            //         mappedWeapon: bookwormyWeapon,
+            //         level: this.weaponLevel,
+            //         weaponDataNull: !weaponData,
+            //         projectiles: this.weaponProjectiles,
+            //         fireRate: this.fireRate,
+            //         bulletColor: this.weaponBulletColor,
+            //     });
+            // } catch (e) {}
         }
     }
 
@@ -729,17 +719,17 @@ class Player {
             } catch (e) {}
         }
 
-        try {
-            telemetry.logEvent('weapon_switch_effective', 'Player', {
-                slot,
-                weaponKey,
-                mappedWeapon,
-                level: this.weaponLevel,
-                projectiles: this.weaponProjectiles,
-                fireRate: this.fireRate,
-                weaponTypeName: this.weaponType,
-            });
-        } catch (e) {}
+        // try {
+        //     telemetry.logEvent('weapon_switch_effective', 'Player', {
+        //         slot,
+        //         weaponKey,
+        //         mappedWeapon,
+        //         level: this.weaponLevel,
+        //         projectiles: this.weaponProjectiles,
+        //         fireRate: this.fireRate,
+        //         weaponTypeName: this.weaponType,
+        //     });
+        // } catch (e) {}
     }
     
     update(deltaTime, keys) {
@@ -790,22 +780,9 @@ class Player {
         if (now - this.lastShot > fireRate) {
             const weaponType = this.weapons[this.currentWeapon];
             
-            // Get weapon data from Bookwormy Guy (automatically logged by telemetry wrapper)
-            let projectiles = this.weaponProjectiles || 1;
-            if (this.dataStore) {
-                const bookwormyWeapon = this.weaponMap[weaponType];
-                if (bookwormyWeapon) {
-                    // This call is automatically logged by telemetry wrapper
-                    const weaponData = this.dataStore.getWeapon(bookwormyWeapon, this.weaponLevel);
-                    if (weaponData) {
-                        // Update local stats in case they changed
-                        this.fireRate = weaponData.fireRate;
-                        this.weaponDamage = weaponData.damage;
-                        projectiles = weaponData.projectiles || 1;
-                        this.weaponProjectiles = projectiles;
-                    }
-                }
-            }
+            // Weapon stats are refreshed on weapon switch + upgrade (see updateWeaponStats()).
+            // Using cached local values here keeps telemetry clean and avoids unnecessary calls.
+            const projectiles = this.weaponProjectiles || 1;
             
             switch (weaponType) {
                 case 'pulse':
