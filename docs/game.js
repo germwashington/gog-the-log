@@ -477,6 +477,39 @@ class Game {
             }
         });
         
+        // Enemy bullets vs enemies (friendly fire)
+        this.bullets.forEach((bullet, bulletIndex) => {
+            if (bullet.owner === 'enemy') {
+                this.enemies.forEach((enemy, enemyIndex) => {
+                    if (this.isColliding(bullet, enemy)) {
+                        // Create explosion particles
+                        this.createExplosion(enemy.x, enemy.y, '#ff8844');
+                        
+                        // Damage enemy
+                        enemy.takeDamage(bullet.damage);
+                        
+                        // Remove bullet
+                        this.bullets.splice(bulletIndex, 1);
+                        
+                        // Play hit sound
+                        this.playSound('hit');
+                        
+                        // If enemy is destroyed
+                        if (enemy.health <= 0) {
+                            this.score += enemy.points;
+                            this.updateUI();
+                            this.playSound('explosion');
+                            
+                            // Chance to drop power-up
+                            if (Math.random() < 0.1) {
+                                this.powerUps.push(new PowerUp(enemy.x, enemy.y));
+                            }
+                        }
+                    }
+                });
+            }
+        });
+        
         // Enemies vs player
         this.enemies.forEach(enemy => {
             if (this.isColliding(enemy, this.player)) {
@@ -551,17 +584,7 @@ class Game {
                 ctx.fillStyle = grad;
         ctx.fillRect(0, this.height - bandHeight, this.width, bandHeight);
 
-        // Moving streak lines
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
-        ctx.lineWidth = 2;
-        const spacing = 40;
-        for (let y = -spacing; y < this.height + spacing; y += spacing) {
-            const lineY = ((y + offset) % (this.height + spacing)) - spacing;
-            ctx.beginPath();
-            ctx.moveTo(0, lineY);
-            ctx.lineTo(this.width, lineY);
-            ctx.stroke();
-        }
+        // Moving streak lines - removed per user request
             ctx.restore();
     }
     
@@ -944,12 +967,10 @@ class Player {
         // Upgrade-driven visual changes
         this.drawUpgradeAccents(ctx);
 
-        // Draw ship outline
+        // Draw ship outline - traced around the actual shape
         ctx.strokeStyle = '#00ff00';
         ctx.lineWidth = 1;
-        ctx.strokeRect(this.x + 10, this.y + 10, 20, 30);
-        ctx.strokeRect(this.x, this.y + 20, 10, 15);
-        ctx.strokeRect(this.x + 30, this.y + 20, 10, 15);
+        this.drawTracedOutline(ctx);
         
         ctx.restore();
     }
@@ -999,6 +1020,70 @@ class Player {
             ctx.fillStyle = '#22ff99';
             ctx.fillRect(this.x + 17, this.y + 2, 6, 4);
         }
+    }
+    
+    drawTracedOutline(ctx) {
+        // Trace around the actual ship shape (body, wings, cockpit)
+        // This creates a path that follows the outer edges of all components
+        
+        const bx = this.x + 10;  // body x
+        const by = this.y + 10;  // body y
+        const bw = 20;            // body width
+        const bh = 30;            // body height
+        
+        const lwx = this.x;       // left wing x
+        const lwy = this.y + 20; // left wing y
+        const lww = 10;           // left wing width
+        const lwh = 15;           // left wing height
+        
+        const rwx = this.x + 30; // right wing x
+        const rwy = this.y + 20;  // right wing y
+        const rww = 10;           // right wing width
+        const rwh = 15;           // right wing height
+        
+        const cx = this.x + 15;   // cockpit x
+        const cy = this.y + 5;   // cockpit y
+        const cw = 10;            // cockpit width
+        
+        ctx.beginPath();
+        
+        // Start from top-left of cockpit
+        ctx.moveTo(cx, cy);
+        // Top of cockpit
+        ctx.lineTo(cx + cw, cy);
+        // Top-right of cockpit to top-right of body
+        ctx.lineTo(bx + bw, by);
+        // Right side of body down to where right wing starts
+        ctx.lineTo(bx + bw, rwy);
+        // Top of right wing (outer edge)
+        ctx.lineTo(rwx + rww, rwy);
+        // Right side of right wing
+        ctx.lineTo(rwx + rww, rwy + rwh);
+        // Bottom of right wing
+        ctx.lineTo(rwx, rwy + rwh);
+        // Left side of right wing (inner edge) back to body
+        ctx.lineTo(bx + bw, rwy + rwh);
+        // Continue down right side of body
+        ctx.lineTo(bx + bw, by + bh);
+        // Bottom of body
+        ctx.lineTo(bx, by + bh);
+        // Left side of body up to where left wing ends
+        ctx.lineTo(bx, rwy + rwh);
+        // Left side of left wing (inner edge)
+        ctx.lineTo(lwx + lww, rwy + rwh);
+        // Bottom of left wing
+        ctx.lineTo(lwx, rwy + rwh);
+        // Left side of left wing
+        ctx.lineTo(lwx, rwy);
+        // Top of left wing (outer edge)
+        ctx.lineTo(lwx + lww, rwy);
+        // Back to top-left of body
+        ctx.lineTo(bx, by);
+        // Back to top-left of cockpit
+        ctx.lineTo(cx, cy);
+        
+        ctx.closePath();
+        ctx.stroke();
     }
 }
 
@@ -1365,11 +1450,174 @@ class Enemy {
     
     drawTierIndicator(ctx) {
         if (this.tier === 'elite') {
-            // Elite enemies get a golden glow
+            // Elite enemies get a golden glow - traced around actual shape
             ctx.strokeStyle = '#ffd700';
             ctx.lineWidth = 2;
-            ctx.strokeRect(this.x - 2, this.y - 2, this.width + 4, this.height + 4);
+            this.drawTracedOutline(ctx);
         }
+    }
+    
+    drawTracedOutline(ctx) {
+        // Trace around the actual enemy shape based on type
+        // This creates a path that follows the outer edges of the enemy's components
+        ctx.beginPath();
+        
+        switch (this.type) {
+            case 'scout':
+                // Scout: main body (x+2, y+2, 16x16) and wings (x, y+6, 20x8)
+                ctx.moveTo(this.x, this.y + 6);
+                ctx.lineTo(this.x + 20, this.y + 6);
+                ctx.lineTo(this.x + 20, this.y + 14);
+                ctx.lineTo(this.x + 18, this.y + 14);
+                ctx.lineTo(this.x + 18, this.y + 18);
+                ctx.lineTo(this.x + 2, this.y + 18);
+                ctx.lineTo(this.x + 2, this.y + 14);
+                ctx.lineTo(this.x, this.y + 14);
+                ctx.closePath();
+                break;
+                
+            case 'drone':
+                // Drone: outer circle (x+1, y+1, 16x16) and inner (x+4, y+4, 10x10)
+                ctx.arc(this.x + 9, this.y + 9, 9, 0, Math.PI * 2);
+                break;
+                
+            case 'fighter':
+                // Fighter: main body (x+2, y+2, 21x21) and wings (x, y+8, 25x10)
+                ctx.moveTo(this.x, this.y + 8);
+                ctx.lineTo(this.x + 25, this.y + 8);
+                ctx.lineTo(this.x + 25, this.y + 18);
+                ctx.lineTo(this.x + 23, this.y + 18);
+                ctx.lineTo(this.x + 23, this.y + 23);
+                ctx.lineTo(this.x + 2, this.y + 23);
+                ctx.lineTo(this.x + 2, this.y + 18);
+                ctx.lineTo(this.x, this.y + 18);
+                ctx.closePath();
+                break;
+                
+            case 'fast':
+                // Fast: body (x+5, y, 15x25) and wings (x, y+10, 25x10)
+                ctx.moveTo(this.x, this.y + 10);
+                ctx.lineTo(this.x + 25, this.y + 10);
+                ctx.lineTo(this.x + 25, this.y + 20);
+                ctx.lineTo(this.x + 20, this.y + 20);
+                ctx.lineTo(this.x + 20, this.y + 25);
+                ctx.lineTo(this.x + 5, this.y + 25);
+                ctx.lineTo(this.x + 5, this.y + 20);
+                ctx.lineTo(this.x, this.y + 20);
+                ctx.closePath();
+                break;
+                
+            case 'zigzag':
+                // Zigzag: body (x+5, y, 20x30) and wings (x, y+12, 30x8)
+                ctx.moveTo(this.x, this.y + 12);
+                ctx.lineTo(this.x + 30, this.y + 12);
+                ctx.lineTo(this.x + 30, this.y + 20);
+                ctx.lineTo(this.x + 25, this.y + 20);
+                ctx.lineTo(this.x + 25, this.y + 30);
+                ctx.lineTo(this.x + 5, this.y + 30);
+                ctx.lineTo(this.x + 5, this.y + 20);
+                ctx.lineTo(this.x, this.y + 20);
+                ctx.closePath();
+                break;
+                
+            case 'sidewinder':
+                // Sidewinder: body (x+6, y, 16x28) and wings (x+1, y+10, 26x10)
+                ctx.moveTo(this.x + 1, this.y + 10);
+                ctx.lineTo(this.x + 27, this.y + 10);
+                ctx.lineTo(this.x + 27, this.y + 20);
+                ctx.lineTo(this.x + 22, this.y + 20);
+                ctx.lineTo(this.x + 22, this.y + 28);
+                ctx.lineTo(this.x + 6, this.y + 28);
+                ctx.lineTo(this.x + 6, this.y + 20);
+                ctx.lineTo(this.x + 1, this.y + 20);
+                ctx.closePath();
+                break;
+                
+            case 'heavy':
+                // Heavy: body (x+10, y, 30x40) and wings (x, y+15, 50x20)
+                ctx.moveTo(this.x, this.y + 15);
+                ctx.lineTo(this.x + 50, this.y + 15);
+                ctx.lineTo(this.x + 50, this.y + 35);
+                ctx.lineTo(this.x + 40, this.y + 35);
+                ctx.lineTo(this.x + 40, this.y + 40);
+                ctx.lineTo(this.x + 10, this.y + 40);
+                ctx.lineTo(this.x + 10, this.y + 35);
+                ctx.lineTo(this.x, this.y + 35);
+                ctx.closePath();
+                break;
+                
+            case 'hunter':
+            case 'elite_hunter':
+                // Hunter: body (x+7, y, 21x35) and wings (x+2, y+12, 31x12)
+                ctx.moveTo(this.x + 2, this.y + 12);
+                ctx.lineTo(this.x + 33, this.y + 12);
+                ctx.lineTo(this.x + 33, this.y + 24);
+                ctx.lineTo(this.x + 28, this.y + 24);
+                ctx.lineTo(this.x + 28, this.y + 35);
+                ctx.lineTo(this.x + 7, this.y + 35);
+                ctx.lineTo(this.x + 7, this.y + 24);
+                ctx.lineTo(this.x + 2, this.y + 24);
+                ctx.closePath();
+                break;
+                
+            case 'bomber':
+            case 'elite_bomber':
+                // Bomber: body (x+7, y, 31x45) and wings (x+2, y+20, 41x15)
+                const bomberHeight = this.type === 'elite_bomber' ? 55 : 45;
+                const bomberWingY = this.type === 'elite_bomber' ? 20 : 20;
+                ctx.moveTo(this.x + 2, this.y + bomberWingY);
+                ctx.lineTo(this.x + 43, this.y + bomberWingY);
+                ctx.lineTo(this.x + 43, this.y + bomberWingY + 15);
+                ctx.lineTo(this.x + 38, this.y + bomberWingY + 15);
+                ctx.lineTo(this.x + 38, this.y + bomberHeight);
+                ctx.lineTo(this.x + 7, this.y + bomberHeight);
+                ctx.lineTo(this.x + 7, this.y + bomberWingY + 15);
+                ctx.lineTo(this.x + 2, this.y + bomberWingY + 15);
+                ctx.closePath();
+                break;
+                
+            case 'spiral':
+            case 'elite_spiral':
+                // Spiral: body (x+6, y, 20x32) and wings (x+1, y+14, 30x6)
+                const spiralHeight = this.type === 'elite_spiral' ? 38 : 32;
+                ctx.moveTo(this.x + 1, this.y + 14);
+                ctx.lineTo(this.x + 31, this.y + 14);
+                ctx.lineTo(this.x + 31, this.y + 20);
+                ctx.lineTo(this.x + 26, this.y + 20);
+                ctx.lineTo(this.x + 26, this.y + spiralHeight);
+                ctx.lineTo(this.x + 6, this.y + spiralHeight);
+                ctx.lineTo(this.x + 6, this.y + 20);
+                ctx.lineTo(this.x + 1, this.y + 20);
+                ctx.closePath();
+                break;
+                
+            case 'turret':
+                // Turret: base (x+2, y+10, width-4, height-12) and mount (x+8, y+6, width-16, 10)
+                ctx.moveTo(this.x + 8, this.y + 6);
+                ctx.lineTo(this.x + this.width - 8, this.y + 6);
+                ctx.lineTo(this.x + this.width - 8, this.y + 16);
+                ctx.lineTo(this.x + this.width - 2, this.y + 16);
+                ctx.lineTo(this.x + this.width - 2, this.y + this.height - 2);
+                ctx.lineTo(this.x + 2, this.y + this.height - 2);
+                ctx.lineTo(this.x + 2, this.y + 16);
+                ctx.lineTo(this.x + 8, this.y + 16);
+                ctx.closePath();
+                break;
+                
+            default: // basic
+                // Basic: body (x+5, y, 20x30) and wings (x, y+10, 30x15)
+                ctx.moveTo(this.x, this.y + 10);
+                ctx.lineTo(this.x + 30, this.y + 10);
+                ctx.lineTo(this.x + 30, this.y + 25);
+                ctx.lineTo(this.x + 25, this.y + 25);
+                ctx.lineTo(this.x + 25, this.y + 30);
+                ctx.lineTo(this.x + 5, this.y + 30);
+                ctx.lineTo(this.x + 5, this.y + 25);
+                ctx.lineTo(this.x, this.y + 25);
+                ctx.closePath();
+        }
+        
+        ctx.stroke();
     }
     
     drawHealthBar(ctx) {
