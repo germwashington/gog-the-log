@@ -520,6 +520,61 @@ class Game {
             }
         });
         
+        // Enemy vs enemy collision - push them apart
+        for (let i = 0; i < this.enemies.length; i++) {
+            for (let j = i + 1; j < this.enemies.length; j++) {
+                const enemy1 = this.enemies[i];
+                const enemy2 = this.enemies[j];
+                
+                if (this.isColliding(enemy1, enemy2)) {
+                    // Calculate sizes (area as proxy for size)
+                    const size1 = enemy1.width * enemy1.height;
+                    const size2 = enemy2.width * enemy2.height;
+                    
+                    // Calculate direction from enemy1 to enemy2
+                    const dx = enemy2.x - enemy1.x;
+                    const dy = enemy2.y - enemy1.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+                    
+                    if (distance > 0) {
+                        // Normalize direction
+                        const nx = dx / distance;
+                        const ny = dy / distance;
+                        
+                        // Push distance (half overlap)
+                        const overlap = (enemy1.width + enemy2.width) / 2 - Math.abs(dx);
+                        const pushDistance = overlap * 0.5;
+                        
+                        if (size1 < size2) {
+                            // Smaller enemy gets pushed more
+                            enemy1.x -= nx * pushDistance * 1.5;
+                            enemy1.y -= ny * pushDistance * 1.5;
+                            enemy2.x += nx * pushDistance * 0.5;
+                            enemy2.y += ny * pushDistance * 0.5;
+                        } else if (size2 < size1) {
+                            // Smaller enemy gets pushed more
+                            enemy1.x -= nx * pushDistance * 0.5;
+                            enemy1.y -= ny * pushDistance * 0.5;
+                            enemy2.x += nx * pushDistance * 1.5;
+                            enemy2.y += ny * pushDistance * 1.5;
+                        } else {
+                            // Equal size - both pushed equally
+                            enemy1.x -= nx * pushDistance;
+                            enemy1.y -= ny * pushDistance;
+                            enemy2.x += nx * pushDistance;
+                            enemy2.y += ny * pushDistance;
+                        }
+                        
+                        // Keep enemies in bounds
+                        enemy1.x = Math.max(0, Math.min(enemy1.x, this.width - enemy1.width));
+                        enemy1.y = Math.max(0, Math.min(enemy1.y, this.height - enemy1.height));
+                        enemy2.x = Math.max(0, Math.min(enemy2.x, this.width - enemy2.width));
+                        enemy2.y = Math.max(0, Math.min(enemy2.y, this.height - enemy2.height));
+                    }
+                }
+            }
+        }
+        
         // Power-ups vs player
         this.powerUps.forEach((powerUp, index) => {
             if (this.isColliding(powerUp, this.player)) {
@@ -970,6 +1025,8 @@ class Player {
         // Draw ship outline - traced around the actual shape
         ctx.strokeStyle = '#00ff00';
         ctx.lineWidth = 1;
+        ctx.lineJoin = 'miter';
+        ctx.lineCap = 'square';
         this.drawTracedOutline(ctx);
         
         ctx.restore();
@@ -1024,7 +1081,9 @@ class Player {
     
     drawTracedOutline(ctx) {
         // Trace around the actual ship shape (body, wings, cockpit)
-        // This creates a path that follows the outer edges of all components
+        // Player ship: body (x+10, y+10, 20x30), left wing (x, y+20, 10x15), 
+        // right wing (x+30, y+20, 10x15), cockpit (x+15, y+5, 10x10)
+        // Trace exact outer perimeter
         
         const bx = this.x + 10;  // body x
         const by = this.y + 10;  // body y
@@ -1453,70 +1512,89 @@ class Enemy {
             // Elite enemies get a golden glow - traced around actual shape
             ctx.strokeStyle = '#ffd700';
             ctx.lineWidth = 2;
+            ctx.lineJoin = 'miter';
+            ctx.lineCap = 'square';
             this.drawTracedOutline(ctx);
         }
     }
     
     drawTracedOutline(ctx) {
         // Trace around the actual enemy shape based on type
-        // This creates a path that follows the outer edges of the enemy's components
+        // This creates a path that follows the exact outer edges of the drawn rectangles
+        // Account for line width by offsetting by half the line width
+        const lineOffset = (ctx.lineWidth || 1) / 2;
         ctx.beginPath();
         
         switch (this.type) {
             case 'scout':
                 // Scout: main body (x+2, y+2, 16x16) and wings (x, y+6, 20x8)
-                ctx.moveTo(this.x, this.y + 6);
-                ctx.lineTo(this.x + 20, this.y + 6);
-                ctx.lineTo(this.x + 20, this.y + 14);
-                ctx.lineTo(this.x + 18, this.y + 14);
-                ctx.lineTo(this.x + 18, this.y + 18);
-                ctx.lineTo(this.x + 2, this.y + 18);
-                ctx.lineTo(this.x + 2, this.y + 14);
-                ctx.lineTo(this.x, this.y + 14);
+                // Trace exact outer perimeter of both rectangles
+                // Wings: (x, y+6, 20, 8) - goes from y+6 to y+14
+                // Body: (x+2, y+2, 16, 16) - goes from y+2 to y+18, x+2 to x+18
+                ctx.moveTo(this.x, this.y + 6);                    // Top-left of wings
+                ctx.lineTo(this.x + 20, this.y + 6);              // Top-right of wings
+                ctx.lineTo(this.x + 20, this.y + 14);             // Bottom-right of wings
+                ctx.lineTo(this.x + 18, this.y + 14);             // Bottom-right of wings to body edge
+                ctx.lineTo(this.x + 18, this.y + 18);             // Bottom-right of body
+                ctx.lineTo(this.x + 2, this.y + 18);              // Bottom-left of body
+                ctx.lineTo(this.x + 2, this.y + 14);               // Bottom-left of body to wings edge
+                ctx.lineTo(this.x, this.y + 14);                   // Bottom-left of wings
                 ctx.closePath();
                 break;
                 
             case 'drone':
-                // Drone: outer circle (x+1, y+1, 16x16) and inner (x+4, y+4, 10x10)
-                ctx.arc(this.x + 9, this.y + 9, 9, 0, Math.PI * 2);
+                // Drone: outer (x+1, y+1, 16x16) - trace around the square
+                ctx.moveTo(this.x + 1, this.y + 1);
+                ctx.lineTo(this.x + 17, this.y + 1);
+                ctx.lineTo(this.x + 17, this.y + 17);
+                ctx.lineTo(this.x + 1, this.y + 17);
+                ctx.closePath();
                 break;
                 
             case 'fighter':
                 // Fighter: main body (x+2, y+2, 21x21) and wings (x, y+8, 25x10)
-                ctx.moveTo(this.x, this.y + 8);
-                ctx.lineTo(this.x + 25, this.y + 8);
-                ctx.lineTo(this.x + 25, this.y + 18);
-                ctx.lineTo(this.x + 23, this.y + 18);
-                ctx.lineTo(this.x + 23, this.y + 23);
-                ctx.lineTo(this.x + 2, this.y + 23);
-                ctx.lineTo(this.x + 2, this.y + 18);
-                ctx.lineTo(this.x, this.y + 18);
+                // Body: (x+2, y+2, 21, 21) - goes to x+23, y+23
+                // Wings: (x, y+8, 25, 10) - goes to x+25, y+18
+                ctx.moveTo(this.x, this.y + 8);                    // Top-left of wings
+                ctx.lineTo(this.x + 25, this.y + 8);              // Top-right of wings
+                ctx.lineTo(this.x + 25, this.y + 18);             // Bottom-right of wings
+                ctx.lineTo(this.x + 23, this.y + 18);             // Bottom-right of wings to body edge
+                ctx.lineTo(this.x + 23, this.y + 23);             // Bottom-right of body
+                ctx.lineTo(this.x + 2, this.y + 23);              // Bottom-left of body
+                ctx.lineTo(this.x + 2, this.y + 18);               // Bottom-left of body to wings edge
+                ctx.lineTo(this.x, this.y + 18);                   // Bottom-left of wings
                 ctx.closePath();
                 break;
                 
             case 'fast':
                 // Fast: body (x+5, y, 15x25) and wings (x, y+10, 25x10)
-                ctx.moveTo(this.x, this.y + 10);
-                ctx.lineTo(this.x + 25, this.y + 10);
-                ctx.lineTo(this.x + 25, this.y + 20);
-                ctx.lineTo(this.x + 20, this.y + 20);
-                ctx.lineTo(this.x + 20, this.y + 25);
-                ctx.lineTo(this.x + 5, this.y + 25);
-                ctx.lineTo(this.x + 5, this.y + 20);
-                ctx.lineTo(this.x, this.y + 20);
+                // Body: (x+5, y, 15, 25) - goes to x+20, y+25
+                // Wings: (x, y+10, 25, 10) - goes to x+25, y+20
+                // Engine glow: (x+8, y+20, 4, 8) and (x+13, y+20, 4, 8) - part of body, ignore for outline
+                ctx.moveTo(this.x, this.y + 10);                   // Top-left of wings
+                ctx.lineTo(this.x + 25, this.y + 10);             // Top-right of wings
+                ctx.lineTo(this.x + 25, this.y + 20);             // Bottom-right of wings
+                ctx.lineTo(this.x + 20, this.y + 20);             // Bottom-right of wings to body edge
+                ctx.lineTo(this.x + 20, this.y + 25);             // Bottom-right of body
+                ctx.lineTo(this.x + 5, this.y + 25);              // Bottom-left of body
+                ctx.lineTo(this.x + 5, this.y + 20);               // Bottom-left of body to wings edge
+                ctx.lineTo(this.x, this.y + 20);                   // Bottom-left of wings
                 ctx.closePath();
                 break;
                 
             case 'zigzag':
-                // Zigzag: body (x+5, y, 20x30) and wings (x, y+12, 30x8)
-                ctx.moveTo(this.x, this.y + 12);
-                ctx.lineTo(this.x + 30, this.y + 12);
-                ctx.lineTo(this.x + 30, this.y + 20);
-                ctx.lineTo(this.x + 25, this.y + 20);
-                ctx.lineTo(this.x + 25, this.y + 30);
-                ctx.lineTo(this.x + 5, this.y + 30);
-                ctx.lineTo(this.x + 5, this.y + 20);
-                ctx.lineTo(this.x, this.y + 20);
+                // Zigzag: body (x+5, y, 20x30) and wings (x, y+12, 30x8) and top (x+8, y+5, 14x6)
+                // Body: (x+5, y, 20, 30) - goes to x+25, y+30
+                // Wings: (x, y+12, 30, 8) - goes to x+30, y+20
+                // Top: (x+8, y+5, 14, 6) - goes to x+22, y+11 (inside wings, ignore for outer outline)
+                ctx.moveTo(this.x, this.y + 12);                   // Top-left of wings
+                ctx.lineTo(this.x + 30, this.y + 12);             // Top-right of wings
+                ctx.lineTo(this.x + 30, this.y + 20);             // Bottom-right of wings
+                ctx.lineTo(this.x + 25, this.y + 20);             // Bottom-right of wings to body edge
+                ctx.lineTo(this.x + 25, this.y + 30);             // Bottom-right of body
+                ctx.lineTo(this.x + 5, this.y + 30);              // Bottom-left of body
+                ctx.lineTo(this.x + 5, this.y + 20);               // Bottom-left of body to wings edge
+                ctx.lineTo(this.x, this.y + 20);                   // Bottom-left of wings
                 ctx.closePath();
                 break;
                 
@@ -1606,14 +1684,16 @@ class Enemy {
                 
             default: // basic
                 // Basic: body (x+5, y, 20x30) and wings (x, y+10, 30x15)
-                ctx.moveTo(this.x, this.y + 10);
-                ctx.lineTo(this.x + 30, this.y + 10);
-                ctx.lineTo(this.x + 30, this.y + 25);
-                ctx.lineTo(this.x + 25, this.y + 25);
-                ctx.lineTo(this.x + 25, this.y + 30);
-                ctx.lineTo(this.x + 5, this.y + 30);
-                ctx.lineTo(this.x + 5, this.y + 25);
-                ctx.lineTo(this.x, this.y + 25);
+                // Body: (x+5, y, 20, 30) - goes to x+25, y+30
+                // Wings: (x, y+10, 30, 15) - goes to x+30, y+25
+                ctx.moveTo(this.x, this.y + 10);                   // Top-left of wings
+                ctx.lineTo(this.x + 30, this.y + 10);             // Top-right of wings
+                ctx.lineTo(this.x + 30, this.y + 25);             // Bottom-right of wings
+                ctx.lineTo(this.x + 25, this.y + 25);             // Bottom-right of wings to body edge
+                ctx.lineTo(this.x + 25, this.y + 30);             // Bottom-right of body
+                ctx.lineTo(this.x + 5, this.y + 30);              // Bottom-left of body
+                ctx.lineTo(this.x + 5, this.y + 25);               // Bottom-left of body to wings edge
+                ctx.lineTo(this.x, this.y + 25);                   // Bottom-left of wings
                 ctx.closePath();
         }
         
