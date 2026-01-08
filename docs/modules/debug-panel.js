@@ -493,7 +493,8 @@ class DebugPanel {
         
         div.onmouseenter = (e) => {
             preview.style.display = 'block';
-            preview.style.left = (e.clientX + 20) + 'px';
+            // Show preview on the left side of cursor (since debug panel is on right)
+            preview.style.left = (e.clientX - 420) + 'px';  // 400px image width + 20px offset
             preview.style.top = (e.clientY + 20) + 'px';
         };
         
@@ -502,7 +503,8 @@ class DebugPanel {
         };
         
         div.onmousemove = (e) => {
-            preview.style.left = (e.clientX + 20) + 'px';
+            // Show preview on the left side of cursor (since debug panel is on right)
+            preview.style.left = (e.clientX - 420) + 'px';  // 400px image width + 20px offset
             preview.style.top = (e.clientY + 20) + 'px';
         };
         

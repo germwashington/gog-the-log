@@ -1365,9 +1365,10 @@ class Enemy {
                     break;
             case 'turret':
                 {
+                    // Shoot from below the turret, not from the center (to avoid self-collision)
                     const tBullet = new Bullet(
                         this.x + this.width/2,
-                        this.y + this.height/2,
+                        this.y + this.height + 5,  // Spawn below the turret
                         'enemy',
                         'homing'
                     );
@@ -1670,15 +1671,20 @@ class Enemy {
                 break;
                 
             case 'turret':
-                // Turret: base (x+2, y+10, width-4, height-12) and mount (x+8, y+6, width-16, 10)
-                ctx.moveTo(this.x + 8, this.y + 6);
-                ctx.lineTo(this.x + this.width - 8, this.y + 6);
-                ctx.lineTo(this.x + this.width - 8, this.y + 16);
-                ctx.lineTo(this.x + this.width - 2, this.y + 16);
-                ctx.lineTo(this.x + this.width - 2, this.y + this.height - 2);
-                ctx.lineTo(this.x + 2, this.y + this.height - 2);
-                ctx.lineTo(this.x + 2, this.y + 16);
-                ctx.lineTo(this.x + 8, this.y + 16);
+                // Turret: base (x+2, y+10, width-4, height-12), mount (x+8, y+6, width-16, 10), barrel (x+width/2-3, y+2, 6, 18)
+                // Trace outer perimeter: mount top, barrel sides, base sides, base bottom
+                ctx.moveTo(this.x + 8, this.y + 6);                    // Top-left of mount
+                ctx.lineTo(this.x + this.width/2 - 3, this.y + 6);     // Top-left of mount to barrel left
+                ctx.lineTo(this.x + this.width/2 - 3, this.y + 2);     // Top-left of barrel
+                ctx.lineTo(this.x + this.width/2 + 3, this.y + 2);     // Top-right of barrel
+                ctx.lineTo(this.x + this.width/2 + 3, this.y + 6);     // Top-right of barrel to mount
+                ctx.lineTo(this.x + this.width - 8, this.y + 6);       // Top-right of mount
+                ctx.lineTo(this.x + this.width - 8, this.y + 16);      // Right side of mount to base
+                ctx.lineTo(this.x + this.width - 2, this.y + 16);      // Right side of base
+                ctx.lineTo(this.x + this.width - 2, this.y + this.height - 2);  // Right side of base down
+                ctx.lineTo(this.x + 2, this.y + this.height - 2);     // Bottom of base
+                ctx.lineTo(this.x + 2, this.y + 16);                  // Left side of base up
+                ctx.lineTo(this.x + 8, this.y + 16);                  // Left side of base to mount
                 ctx.closePath();
                 break;
                 
